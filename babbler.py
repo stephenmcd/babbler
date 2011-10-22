@@ -78,7 +78,7 @@ def main():
                 if value is None:
                     value = raw_input("Please enter '%s': " % option.help)
                 options[option.dest] = value
-        data = {"options": options, "entries": {}}
+        data = {"options": options, "todo": [], "done": {}}
     else:
         # Override any previously saved options with any values
         # provided via command line.
@@ -101,20 +101,34 @@ def main():
                       if k.split("_")[0] in ("consumer", "access")]))
 
     while True:
+
+        # Go through the feed's entries, oldest first, and add new
+        # entries to the "todo" list.
+        todo = []
         for entry in reversed(parse(options["feed_url"]).entries):
-            # Ignore saved entries or those that can't fit into a tweet.
-            saved = entry["id"] in data["entries"]
-            if saved or len(entry["title"]) > TWEET_MAX_LEN:
-                continue
-            # Save the entry to the data file.
-            data["entries"][entry["id"]] = entry["title"]
+            # Ignore entries that can't fit into a tweet, or are
+            # already in "todo" or "done".
+            if (len(entry["title"]) <= TWEET_MAX_LEN and
+                entry["id"] not in [t["id"] for t in data["todo"]] and
+                entry["id"] not in data["done"]):
+                new_entries = True
+                todo.append({"id": entry["id"], "title": entry["title"]})
+        # Save the data file if new entries found.
+        if todo:
+            print "%s new entries added to the queue." % len(todo)
+            data["todo"].extend(todo)
             with open(DATA_PATH, "wb") as f:
                 dump(data, f)
+        print "%s entries are in the queue." % len(data["todo"])
+
+        # Process the first entry in the "todo" list.
+        if data["todo"]:
+            entry = data["todo"][0]
             # Add hashtags - get a list of non-dictionary words
-            # from the title with only alpha characters that are
-            # longer than 3 characters, and add them to the tweet,
+            # from the title with only alpha characters that meet
+            # the minimum hashtag length, and add them to the tweet,
             # longest hashtags first, if they don't make the tweet
-            # too long and have been used as hashtags by others.
+            # too long and have been used as hashtags by other people.
             chars = "".join([c for c in entry["title"].lower()
                              if c.isalnum() or c == " "])
             tags = set([w for w in chars.split() if w not in words and
@@ -124,11 +138,14 @@ def main():
                 if (len(entry["title"] + tag) <= TWEET_MAX_LEN and
                     api.GetSearch(tag.strip())):
                     entry["title"] += tag
-            # Post to Twitter and cancel checking the remaining
-            # entries so that we can pause between tweets.
+            # Post to Twitter.
             print entry["title"]
             api.PostUpdate(entry["title"])
-            break
+            # Move the entry from "todo" to "done" and save the data file.
+            data["done"][entry["id"]] = entry["title"]
+            del data["todo"][0]
+            with open(DATA_PATH, "wb") as f:
+                dump(data, f)
 
         # Pause between tweets - pause also occurs when no new entries
         # are found so that we don't hammer the feed URL.
