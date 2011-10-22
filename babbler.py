@@ -117,8 +117,8 @@ def main():
             # too long and have been used as hashtags by others.
             chars = "".join([c for c in entry["title"].lower()
                              if c.isalnum() or c == " "])
-            tags = [w for w in chars.split() if w not in words and
-                    len(w) >= options["hashtag_len_min"]]
+            tags = set([w for w in chars.split() if w not in words and
+                        len(w) >= options["hashtag_len_min"]])
             for tag in sorted(tags, key=len, reverse=True):
                 tag = " #" + tag
                 if (len(entry["title"] + tag) <= TWEET_MAX_LEN and
