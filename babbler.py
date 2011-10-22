@@ -81,6 +81,8 @@ def main():
                 options[option.dest] = value
         data = {"options": options, "entries": {}}
     else:
+        # Override any previously saved options with any values
+        # provided via command line.
         for option in parser.option_list:
             if option.dest is not None:
                 value = getattr(parsed_options, option.dest)
@@ -113,14 +115,15 @@ def main():
             # from the title with only alpha characters that are
             # longer than 3 characters, and add them to the tweet,
             # longest hashtags first, if they don't make the tweet
-            # too long.
+            # too long and have been used as hashtags by others.
             chars = "".join([c for c in entry["title"].lower()
                              if c in letters + " "])
             tags = [w for w in chars.split() if w not in words and
                     len(w) > options["hashtag_len_min"]]
             for tag in sorted(tags, key=len, reverse=True):
                 tag = " #" + tag
-                if len(entry["title"] + tag) <= TWEET_MAX_LEN:
+                if (len(entry["title"] + tag) <= TWEET_MAX_LEN and
+                    api.GetSearch(tag.strip())):
                     entry["title"] += tag
             # Post to Twitter and cancel checking the remaining
             # entries so that we can pause between tweets.
