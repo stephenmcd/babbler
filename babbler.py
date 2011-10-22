@@ -9,6 +9,7 @@ from datetime import datetime
 from os import getcwd
 from os.path import join
 from random import randint
+from string import letters
 from time import sleep
 
 from feedparser import parse
@@ -67,8 +68,7 @@ def main():
     # duplicate possesive apostophes as we'll strip apostrophes when
     # determining hashtags.
     with open(settings["words_path"], "r") as f:
-        dictionary = set([s.strip().replace("'", "") for s in f
-                          if s[0].islower()])
+        words = set([s.strip().replace("'", "") for s in f if s[0].islower()])
 
     # Set up the Twitter API object.
     api = Api(**dict([(k, v) for k, v in settings.items()
@@ -89,11 +89,11 @@ def main():
             # longer than 3 characters, and add them to the tweet,
             # longest hashtags first, if they don't make the tweet
             # too long.
-            chars = [c for c in entry["title"].lower()
-                     if c.isalpha() or c == " "]
-            tags = [" #" + w for w in "".join(chars).split()
-                    if w not in dictionary if len(w) > 3]
+            alpha = letters + " "
+            chars = "".join([c for c in entry["title"].lower() if c in alpha])
+            tags = [w for w in chars.split() if w not in words and len(w) > 3]
             for tag in sorted(tags, key=len, reverse=True):
+                tag = " #" + tag
                 if len(entry["title"] + tag) <= settings["tweet_max_len"]:
                     entry["title"] += tag
             # Post to Twitter and cancel checking the remaining
