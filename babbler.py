@@ -13,7 +13,7 @@ from random import randint
 from time import sleep
 
 from feedparser import parse
-from twitter import Api
+from twitter import Api, TwitterError
 
 
 __version__ = "0.1"
@@ -105,7 +105,12 @@ def main():
         # Go through the feed's entries, oldest first, and add new
         # entries to the "todo" list.
         todo = []
-        for entry in reversed(parse(options["feed_url"]).entries):
+        feed = parse(options["feed_url"])
+        try:
+            print "Feed error: %s" % feed["bozo_exception"]
+        except KeyError:
+            pass
+        for entry in reversed(feed.entries):
             # Ignore entries that can't fit into a tweet, or are
             # already in "todo" or "done".
             if (len(entry["title"]) <= TWEET_MAX_LEN and
@@ -139,13 +144,20 @@ def main():
                     api.GetSearch(tag.strip())):
                     entry["title"] += tag
             # Post to Twitter.
-            print entry["title"]
-            api.PostUpdate(entry["title"])
-            # Move the entry from "todo" to "done" and save the data file.
-            data["done"][entry["id"]] = entry["title"]
-            del data["todo"][0]
-            with open(DATA_PATH, "wb") as f:
-                dump(data, f)
+            done = True
+            try:
+                api.PostUpdate(entry["title"])
+            except TwitterError, e:
+                print "Twitter error: %s" % e
+                # Make the entry as done if it's a duplicate.
+                done = str(e) == "Status is a duplicate."
+            if done:
+                print "Tweeted: %s" % entry["title"]
+                # Move the entry from "todo" to "done" and save the data file.
+                data["done"][entry["id"]] = entry["title"]
+                del data["todo"][0]
+                with open(DATA_PATH, "wb") as f:
+                    dump(data, f)
 
         # Pause between tweets - pause also occurs when no new entries
         # are found so that we don't hammer the feed URL.
