@@ -10,7 +10,6 @@ from optparse import OptionParser
 from os import getcwd
 from os.path import join
 from random import randint
-from string import letters
 from time import sleep
 
 from feedparser import parse
@@ -67,13 +66,13 @@ def main():
     except IOError:
         # If no data file exists, prompt the user for the required options
         # and create the data file, persisting the entered options.
+        print
+        print "Initial setup."
+        print "All data will be saved to '%s'" % DATA_PATH
+        print "Press CTRL C to abort."
+        print
         options = {}
         for option in parser.option_list:
-            print
-            print "Initial setup."
-            print "All data will be saved to '%s'" % DATA_PATH
-            print "Press CTRL C to abort."
-            print
             if option.dest is not None:
                 value = getattr(parsed_options, option.dest)
                 if value is None:
@@ -117,9 +116,9 @@ def main():
             # longest hashtags first, if they don't make the tweet
             # too long and have been used as hashtags by others.
             chars = "".join([c for c in entry["title"].lower()
-                             if c in letters + " "])
+                             if c.isalnum() or c == " "])
             tags = [w for w in chars.split() if w not in words and
-                    len(w) > options["hashtag_len_min"]]
+                    len(w) >= options["hashtag_len_min"]]
             for tag in sorted(tags, key=len, reverse=True):
                 tag = " #" + tag
                 if (len(entry["title"] + tag) <= TWEET_MAX_LEN and
