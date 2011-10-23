@@ -148,7 +148,9 @@ def main():
             data["todo"].extend(todo)
             with open(DATA_PATH, "wb") as f:
                 dump(data, f)
-        print "%s entries are in the queue." % len(data["todo"])
+        total = len(data["todo"])
+        if total:
+            print "%s entries are in the queue." % total
 
         # Process the first entry in the "todo" list.
         if data["todo"]:
