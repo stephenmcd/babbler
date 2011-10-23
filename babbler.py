@@ -7,6 +7,7 @@ as hashtags.
 from __future__ import with_statement
 from cPickle import dump, load
 from datetime import datetime
+import logging
 from optparse import OptionParser
 from os import getcwd, remove
 from os.path import join, dirname
@@ -52,6 +53,9 @@ def main():
     parser.add_option("--delay-max", dest="delay_max",
                       default=60*40,
                       help="Maximum number of seconds between posts")
+    parser.add_option("--loglevel", dest="loglevel",
+                      default="info", choices=("error", "info", "debug"),
+                      help="Level of information printed")
     parser.add_option("--DESTROY", dest="destroy",
                       default=False, action="store_true",
                       help="Deletes all saved data and tweets from Twitter")
@@ -99,6 +103,10 @@ def main():
                     data["options"][option.dest] = value
         options = data["options"]
 
+    # Set up logging.
+    logging.basicConfig(format="%(asctime)s %(message)s")
+    logging.getLogger().setLevel(getattr(logging, options["loglevel"].upper()))
+
     # Set up the Twitter API object.
     api = Api(**dict([(k, v) for k, v in options.items()
                       if k.split("_")[0] in ("consumer", "access")]))
@@ -135,7 +143,7 @@ def main():
         todo = []
         feed = parse(options["feed_url"])
         try:
-            print "Feed error: %s" % feed["bozo_exception"]
+            logging.error("Feed error: %s" % feed["bozo_exception"])
         except KeyError:
             pass
         for entry in reversed(feed.entries):
@@ -144,17 +152,16 @@ def main():
             if (len(entry["title"]) <= TWEET_MAX_LEN and
                 entry["id"] not in [t["id"] for t in data["todo"]] and
                 entry["id"] not in data["done"]):
-                new_entries = True
                 todo.append({"id": entry["id"], "title": entry["title"]})
         # Save the data file if new entries found.
         if todo:
-            print "%s new entries added to the queue." % len(todo)
+            logging.debug("New entries in the queue: %s" % len(todo))
             data["todo"].extend(todo)
             with open(DATA_PATH, "wb") as f:
                 dump(data, f)
         total = len(data["todo"])
         if total:
-            print "%s entries are in the queue." % total
+            logging.debug("Total entries in the queue: %s" % total)
 
         # Process the first entry in the "todo" list.
         if data["todo"]:
@@ -184,6 +191,7 @@ def main():
             words = "".join([c for c in tweet.lower().replace("-", " ")
                              if c.isalnum() or c == " "]).split()
             hashtags = {}
+            logging.debug("Getting hashtags for: %s" % tweet)
             for i, word in enumerate(words):
                 if word not in dictionary:
                     possibles = [word]
@@ -193,8 +201,12 @@ def main():
                     if i < len(words) - 1 and words[i+1] not in stopwords:
                         # Combined with next word.
                         possibles.append(word + words[i+1])
+                    logging.debug("Possible hashtags from the word '%s': %s" %
+                                  (word, ", ".join(possibles)))
                     # Check none of the possibilities have been used.
-                    if not [p for p in possibles if p in hashtags.keys()]:
+                    if [p for p in possibles if p in hashtags.keys()]:
+                        logging.debug("Possible hashtags already used")
+                    else:
                         highest = 0
                         hashtag = None
                         for possible in possibles:
@@ -202,22 +214,25 @@ def main():
                                 [c for c in possible if c.isalpha()]):
                                 try:
                                     results = api.GetSearch("#" + possible)
-                                except TwitterError:
-                                    pass
+                                except TwitterError, e:
+                                    logging.error("Twitter error: %s" % e)
                                 else:
                                     score = sum([t.created_at_in_seconds
                                                  for t in results])
+                                    logging.debug("Score for '%s': %s" %
+                                                  (possible, score))
                                     if score > highest:
                                         highest = score
                                         hashtag = possible
                         if hashtag:
                             hashtags[hashtag] = score
-            # Sort hashtags by score.
-            sorted_hashtags = sorted(hashtags.keys(),
-                                     key=lambda k: hashtags[k],
-                                     reverse=True)
-            # Add hashtags to tweet.
-            for hashtag in sorted_hashtags:
+
+            # Sort hashtags by score and add to tweet.
+            sort = lambda k: hashtags[k]
+            hashtags = sorted(hashtags.keys(), key=sort, reverse=True)
+            logging.debug("Hashtags found: %s" % (", ".join(hashtags)
+                                                  if hashtags else "none"))
+            for hashtag in hashtags:
                 hashtag = " #" + hashtag
                 if len(tweet + hashtag) <= TWEET_MAX_LEN:
                     tweet += hashtag
@@ -227,11 +242,11 @@ def main():
             try:
                 api.PostUpdate(tweet)
             except TwitterError, e:
-                print "Twitter error: %s" % e
+                logging.error("Twitter error: %s" % e)
                 # Make the entry as done if it's a duplicate.
                 done = str(e) == "Status is a duplicate."
             if done:
-                print "Tweeted: %s" % tweet
+                logging.info("Tweeted: %s" % tweet)
                 # Move the entry from "todo" to "done" and save the data file.
                 data["done"].add(data["todo"].pop(0)["id"])
                 with open(DATA_PATH, "wb") as f:
@@ -239,7 +254,9 @@ def main():
 
         # Pause between tweets - pause also occurs when no new entries
         # are found so that we don't hammer the feed URL.
-        sleep(randint(int(options["delay_min"]), int(options["delay_max"])))
+        delay = randint(int(options["delay_min"]), int(options["delay_max"]))
+        logging.debug("Pausing for %s seconds" % delay)
+        sleep(delay)
 
 
 if __name__ == "__main__":
