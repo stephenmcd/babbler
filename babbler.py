@@ -198,7 +198,7 @@ def main():
                     if not [p for p in possibles if p in hashtags]:
                         for possible in possibles:
                             if (len(possible) >= options["hashtag_len_min"] and
-                                api.GetSearch(possible)):
+                                api.GetSearch("#" + possible)):
                                 # Valid hashtag - add it to the list
                                 # and break to the next word.
                                 hashtags.append(possible)
