@@ -30,10 +30,9 @@ def wordfile(filename):
 
 def main():
     """
-    Get the entries from the feed and go through them, oldest first.
-    If the entry hasn't been saved to the data file, extract hashtags
-    from it and post it to Twitter, and then abort entries for the
-    rest of the feed. Finally pause for a given time period between
+    Get the entries from the feed and go through them, oldest first,
+    adding them to the "todo" queue. Then take the first from the queue
+    and post it to Twitter. Finally pause for a given time period between
     the min/max delay options.
     """
 
@@ -169,49 +168,56 @@ def main():
             # 2) Go through every word and if not a dictionary word,
             #    create up to 3 possible tags from it, the word
             #    combined with the previous word, the next word, and
-            #    just the word itself - the ordering is significant as
-            #    a non-dictionary word joined to a word on either side
-            #    of it is more likely to be a better hashtag than the
-            #    word on its own. Only use previous/next words that
-            #    aren't stopwords.
+            #    just the word itself. Only use previous/next words
+            #    that aren't stopwords.
             # 3) Ignore all possible hashtags from the word if any of
             #    them have already been added as hashtags, eg via the
             #    previous or next word iteration, or a duplicate.
-            # 4) Grab the first of the possibilities that meets the
-            #    minimum length requirement, has at least 1 letter,
-            #    and has also been used by someone else as a hashtag,
-            #    checked via API search, and add it to the list of
-            #    hashtags to use.
-            # 5) Sort the hashtags by longest first as a criteria for
-            #    significance, and add as many as possible to the tweet
-            #    within its length limit.
+            # 4) Search for the possible hashtags via the API, giving
+            #    each a score based on the sum of the seconds since
+            #    epoch for each search result, and pick the highest
+            #    scoring hashtag to use.
+            # 5) Sort the hashtags found by score, and add as many as
+            #    possible to the tweet within its length limit.
 
             # Initial word list.
             words = "".join([c for c in tweet.lower().replace("-", " ")
                              if c.isalnum() or c == " "]).split()
-            hashtags = []
+            hashtags = {}
             for i, word in enumerate(words):
                 if word not in dictionary:
-                    possibles = []
+                    possibles = [word]
                     if i > 0 and words[i-1] not in stopwords:
                         # Combined with previous word.
                         possibles.append(words[i-1] + word)
                     if i < len(words) - 1 and words[i+1] not in stopwords:
                         # Combined with next word.
                         possibles.append(word + words[i+1])
-                    possibles.append(word)
                     # Check none of the possibilities have been used.
-                    if not [p for p in possibles if p in hashtags]:
+                    if not [p for p in possibles if p in hashtags.keys()]:
+                        highest = 0
+                        hashtag = None
                         for possible in possibles:
                             if (len(possible) >= options["hashtag_len_min"] and
-                                [c for c in possible if c.isalpha()] and
-                                api.GetSearch("#" + possible)):
-                                # Valid hashtag - add it to the list
-                                # and break to the next word.
-                                hashtags.append(possible)
-                                break
+                                [c for c in possible if c.isalpha()]):
+                                try:
+                                    results = api.GetSearch("#" + possible)
+                                except TwitterError:
+                                    pass
+                                else:
+                                    score = sum([t.created_at_in_seconds
+                                                 for t in results])
+                                    if score > highest:
+                                        highest = score
+                                        hashtag = possible
+                        if hashtag:
+                            hashtags[hashtag] = score
+            # Sort hashtags by score.
+            sorted_hashtags = sorted(hashtags.keys(),
+                                     key=lambda k: hashtags[k],
+                                     reverse=True)
             # Add hashtags to tweet.
-            for hashtag in sorted(hashtags, key=len, reverse=True):
+            for hashtag in sorted_hashtags:
                 hashtag = " #" + hashtag
                 if len(tweet + hashtag) <= TWEET_MAX_LEN:
                     tweet += hashtag
