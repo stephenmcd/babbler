@@ -107,11 +107,14 @@ def main():
     # Reset all data and delete tweets if specified.
     if parsed_options.destroy:
         print
-        print "WARNING: You have specified the --DESTROY option"
+        print "WARNING: You have specified the --DESTROY option."
         print "All tweets will be deleted from your account."
         if raw_input("Enter 'y' to continue. ").strip().lower() == "y":
             print "Deleting all data and tweets."
-            remove(DATA_PATH)
+            try:
+                remove(DATA_PATH)
+            except OSError:
+                pass
             while True:
                 tweets = api.GetUserTimeline()
                 if not tweets:
@@ -121,6 +124,7 @@ def main():
                        api.DestroyStatus(tweet.id)
                     except TwitterError:
                         pass
+            print "Done."
             exit()
         else:
             print "--DESTROY aborted"
@@ -164,18 +168,20 @@ def main():
             #    with only alpha-numeric characters.
             # 2) Go through every word and if not a dictionary word,
             #    create up to 3 possible tags from it, the word
-            #    combined with the previous word, the next words, and
+            #    combined with the previous word, the next word, and
             #    just the word itself - the ordering is significant as
             #    a non-dictionary word joined to a word on either side
             #    of it is more likely to be a better hashtag than the
-            #    word on its own.
+            #    word on its own. Only use previous/next words that
+            #    aren't stopwords.
             # 3) Ignore all possible hashtags from the word if any of
             #    them have already been added as hashtags, eg via the
             #    previous or next word iteration, or a duplicate.
             # 4) Grab the first of the possibilities that meets the
-            #    minimum length requirement, and has also been used
-            #    by someone else as a hashtag, checked via API search,
-            #    and add it to the list of hashtags to use.
+            #    minimum length requirement, has at least 1 letter,
+            #    and has also been used by someone else as a hashtag,
+            #    checked via API search, and add it to the list of
+            #    hashtags to use.
             # 5) Sort the hashtags by longest first as a criteria for
             #    significance, and add as many as possible to the tweet
             #    within its length limit.
@@ -184,20 +190,22 @@ def main():
             words = "".join([c for c in tweet.lower().replace("-", " ")
                              if c.isalnum() or c == " "]).split()
             hashtags = []
+            stopwords = [] #  TODO: populate this.
             for i, word in enumerate(words):
                 if word not in dictionary:
                     possibles = []
-                    if i > 0:
+                    if i > 0 and words[i-1] not in stopwords:
                         # Combined with previous word.
                         possibles.append(words[i-1] + word)
-                    if i < len(words) - 1:
+                    if i < len(words) - 1 and words[i+1] not in stopwords:
                         # Combined with next word.
-                        possibles.append(word + words[i + 1])
+                        possibles.append(word + words[i+1])
                     possibles.append(word)
                     # Check none of the possibilities have been used.
                     if not [p for p in possibles if p in hashtags]:
                         for possible in possibles:
                             if (len(possible) >= options["hashtag_len_min"] and
+                                [c for c in possible if c.isalpha()] and
                                 api.GetSearch("#" + possible)):
                                 # Valid hashtag - add it to the list
                                 # and break to the next word.
