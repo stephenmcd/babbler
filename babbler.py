@@ -7,7 +7,7 @@ from the titles to use as hashtags.
 from cPickle import dump, load
 from datetime import datetime
 from optparse import OptionParser
-from os import getcwd
+from os import getcwd, remove
 from os.path import join
 from random import randint
 from time import sleep
@@ -45,6 +45,9 @@ def main():
     parser.add_option("--delay-max", dest="delay_max",
                       default=60*40,
                       help="Maximum number of seconds between posts")
+    parser.add_option("--DESTROY", dest="destroy",
+                      default=False, action="store_true",
+                      help="Deletes all saved data and tweets from Twitter")
 
     parser.add_option("--feed-url", dest="feed_url",
                       help="RSS Feed URL")
@@ -99,6 +102,27 @@ def main():
     # Set up the Twitter API object.
     api = Api(**dict([(k, v) for k, v in options.items()
                       if k.split("_")[0] in ("consumer", "access")]))
+
+    # Reset all data and delete tweets if specified.
+    if parsed_options.destroy:
+        print
+        print "WARNING: You have specified the --DESTROY option"
+        print "All tweets will be deleted from your account."
+        if raw_input("Enter 'y' to continue. ").strip().lower() == "y":
+            print "Deleting all data and tweets."
+            remove(DATA_PATH)
+            while True:
+                tweets = api.GetUserTimeline()
+                if not tweets:
+                    break
+                for tweet in tweets:
+                    try:
+                       api.DestroyStatus(tweet.id)
+                    except TwitterError:
+                        pass
+            exit()
+        else:
+            print "--DESTROY aborted"
 
     while True:
 
