@@ -1,14 +1,15 @@
 """
-A Twitter bot that polls an RSS feed and posts the feed's titles
-at random intervals as tweets, extracting non-dictionary words
-from the titles to use as hashtags.
+A Twitter bot that polls an RSS feed and posts the feed's titles at
+random intervals as tweets, extracting words from the titles to use
+as hashtags.
 """
 
+from __future__ import with_statement
 from cPickle import dump, load
 from datetime import datetime
 from optparse import OptionParser
 from os import getcwd, remove
-from os.path import join
+from os.path import join, dirname
 from random import randint
 from time import sleep
 
@@ -18,6 +19,14 @@ from twitter import Api, TwitterError
 
 __version__ = "0.1"
 
+
+def wordfile(filename):
+    """
+    Returns a set word list from a file.
+    Used for dictionary and stopwords.
+    """
+    with open(join(dirname(__file__), "wordfiles", filename)) as f:
+        return set([s.strip() for s in f])
 
 def main():
     """
@@ -30,12 +39,11 @@ def main():
 
     DATA_PATH = join(getcwd(), "babbler.data")
     TWEET_MAX_LEN = 140
+    dictionary = wordfile("dictionary.txt")
+    stopwords = wordfile("stopwords.txt")
 
     parser = OptionParser(usage="usage: %prog [options]")
 
-    parser.add_option("--dictionary-path", dest="dictionary_path",
-                      default="/usr/share/dict/words",
-                      help="Path to dictionary file.")
     parser.add_option("--hashtag-length-min", dest="hashtag_len_min",
                       default=3,
                       help="Minimum length of a hashtag")
@@ -91,14 +99,6 @@ def main():
                 if value is not None:
                     data["options"][option.dest] = value
         options = data["options"]
-
-    # Load the dictionary words file. Given the typical UNIX dictionary,
-    # we're not interested in names of things (uppercase words) or
-    # duplicate possesive apostophes as we'll strip apostrophes when
-    # determining hashtags.
-    with open(options["dictionary_path"], "r") as f:
-        dictionary = set([s.strip().replace("'", "") for s in f
-                          if s[0].islower()])
 
     # Set up the Twitter API object.
     api = Api(**dict([(k, v) for k, v in options.items()
@@ -190,7 +190,6 @@ def main():
             words = "".join([c for c in tweet.lower().replace("-", " ")
                              if c.isalnum() or c == " "]).split()
             hashtags = []
-            stopwords = [] #  TODO: populate this.
             for i, word in enumerate(words):
                 if word not in dictionary:
                     possibles = []
