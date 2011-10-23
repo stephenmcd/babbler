@@ -81,7 +81,7 @@ def main():
                 if value is None:
                     value = raw_input("Please enter '%s': " % option.help)
                 options[option.dest] = value
-        data = {"options": options, "todo": [], "done": {}}
+        data = {"options": options, "todo": [], "done": set()}
     else:
         # Override any previously saved options with any values
         # provided via command line.
@@ -178,8 +178,7 @@ def main():
             if done:
                 print "Tweeted: %s" % entry["title"]
                 # Move the entry from "todo" to "done" and save the data file.
-                data["done"][entry["id"]] = entry["title"]
-                del data["todo"][0]
+                data["done"].add(data["todo"].pop(0)["id"])
                 with open(DATA_PATH, "wb") as f:
                     dump(data, f)
 
