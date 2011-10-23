@@ -33,7 +33,7 @@ def main():
 
     parser = OptionParser(usage="usage: %prog [options]")
 
-    parser.add_option("--words-path", dest="words_path",
+    parser.add_option("--dictionary-path", dest="dictionary_path",
                       default="/usr/share/dict/words",
                       help="Path to dictionary file.")
     parser.add_option("--hashtag-length-min", dest="hashtag_len_min",
@@ -96,8 +96,9 @@ def main():
     # we're not interested in names of things (uppercase words) or
     # duplicate possesive apostophes as we'll strip apostrophes when
     # determining hashtags.
-    with open(options["words_path"], "r") as f:
-        words = set([s.strip().replace("'", "") for s in f if s[0].islower()])
+    with open(options["dictionary_path"], "r") as f:
+        dictionary = set([s.strip().replace("'", "") for s in f
+                          if s[0].islower()])
 
     # Set up the Twitter API object.
     api = Api(**dict([(k, v) for k, v in options.items()
@@ -154,31 +155,70 @@ def main():
 
         # Process the first entry in the "todo" list.
         if data["todo"]:
-            entry = data["todo"][0]
-            # Add hashtags - get a list of non-dictionary words
-            # from the title with only alpha characters that meet
-            # the minimum hashtag length, and add them to the tweet,
-            # longest hashtags first, if they don't make the tweet
-            # too long and have been used as hashtags by other people.
-            chars = "".join([c for c in entry["title"].lower()
-                             if c.isalnum() or c == " "])
-            tags = set([w for w in chars.split() if w not in words and
-                        len(w) >= options["hashtag_len_min"]])
-            for tag in sorted(tags, key=len, reverse=True):
-                tag = " #" + tag
-                if (len(entry["title"] + tag) <= TWEET_MAX_LEN and
-                    api.GetSearch(tag.strip())):
-                    entry["title"] += tag
+
+            tweet = data["todo"][0]["title"]
+
+            # Add hashtags.
+            #
+            # 1) Get a list of non-dictionary words from the tweet
+            #    with only alpha-numeric characters.
+            # 2) Go through every word and if not a dictionary word,
+            #    create up to 3 possible tags from it, the word
+            #    combined with the previous word, the next words, and
+            #    just the word itself - the ordering is significant as
+            #    a non-dictionary word joined to a word on either side
+            #    of it is more likely to be a better hashtag than the
+            #    word on its own.
+            # 3) Ignore all possible hashtags from the word if any of
+            #    them have already been added as hashtags, eg via the
+            #    previous or next word iteration, or a duplicate.
+            # 4) Grab the first of the possibilities that meets the
+            #    minimum length requirement, and has also been used
+            #    by someone else as a hashtag, checked via API search,
+            #    and add it to the list of hashtags to use.
+            # 5) Sort the hashtags by longest first as a criteria for
+            #    significance, and add as many as possible to the tweet
+            #    within its length limit.
+
+            # Initial word list.
+            words = "".join([c for c in tweet.lower().replace("-", " ")
+                             if c.isalnum() or c == " "]).split()
+            hashtags = []
+            for i, word in enumerate(words):
+                if word not in dictionary:
+                    possibles = []
+                    if i > 0:
+                        # Combined with previous word.
+                        possibles.append(words[i-1] + word)
+                    if i < len(words) - 1:
+                        # Combined with next word.
+                        possibles.append(word + words[i + 1])
+                    possibles.append(word)
+                    # Check none of the possibilities have been used.
+                    if not [p for p in possibles if p in hashtags]:
+                        for possible in possibles:
+                            if (len(possible) >= options["hashtag_len_min"] and
+                                api.GetSearch(possible)):
+                                # Valid hashtag - add it to the list
+                                # and break to the next word.
+                                hashtags.append(possible)
+                                break
+            # Add hashtags to tweet.
+            for hashtag in sorted(hashtags, key=len, reverse=True):
+                hashtag = " #" + hashtag
+                if len(tweet + hashtag) <= TWEET_MAX_LEN:
+                    tweet += hashtag
+
             # Post to Twitter.
             done = True
             try:
-                api.PostUpdate(entry["title"])
+                api.PostUpdate(tweet)
             except TwitterError, e:
                 print "Twitter error: %s" % e
                 # Make the entry as done if it's a duplicate.
                 done = str(e) == "Status is a duplicate."
             if done:
-                print "Tweeted: %s" % entry["title"]
+                print "Tweeted: %s" % tweet
                 # Move the entry from "todo" to "done" and save the data file.
                 data["done"].add(data["todo"].pop(0)["id"])
                 with open(DATA_PATH, "wb") as f:
