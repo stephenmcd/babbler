@@ -21,6 +21,10 @@ from twitter import Api, TwitterError
 __version__ = "0.1"
 
 
+DATA_PATH = join(getcwd(), "babbler.data")
+TWEET_MAX_LEN = 140
+
+
 def wordfile(filename):
     """
     Returns a set word list from a file.
@@ -29,21 +33,21 @@ def wordfile(filename):
     with open(join(dirname(__file__), "wordfiles", filename)) as f:
         return set([s.strip() for s in f])
 
-def main():
+def save(dry_run=False):
     """
-    Get the entries from the feed and go through them, oldest first,
-    adding them to the "todo" queue. Then take the first from the queue
-    and post it to Twitter. Finally pause for a given time period between
-    the min/max delay options.
+    Persists the data file to disk.
     """
+    if not dry_run:
+        with open(DATA_PATH, "wb") as f:
+            dump(data, f)
 
-    DATA_PATH = join(getcwd(), "babbler.data")
-    TWEET_MAX_LEN = 140
-    dictionary = wordfile("dictionary.txt")
-    stopwords = wordfile("stopwords.txt")
+def configure():
+    """
+    Handles command-line arg parsing and loading of options and data.
+    """
+    global options, data, api, dictionary, stopwords
 
     parser = OptionParser(usage="usage: %prog [options]")
-
     parser.add_option("--hashtag-length-min", dest="hashtag_len_min",
                       default=3,
                       help="Minimum length of a hashtag")
@@ -65,7 +69,6 @@ def main():
     parser.add_option("--DESTROY", dest="destroy",
                       default=False, action="store_true",
                       help="Deletes all saved data and tweets from Twitter")
-
     parser.add_option("--feed-url", dest="feed_url",
                       help="RSS Feed URL")
     parser.add_option("--consumer-key", dest="consumer_key",
@@ -76,7 +79,6 @@ def main():
                       help="Twitter Access Token Key")
     parser.add_option("--access-token-secret", dest="access_token_secret",
                       help="Twitter Access Token Secret")
-
     (parsed_options, args) = parser.parse_args()
 
     try:
@@ -108,158 +110,194 @@ def main():
                 if value is not None:
                     data["options"][option.dest] = value
         options = data["options"]
-    # Save parsed options.
-    with open(DATA_PATH, "wb") as f:
-        dump(data, f)
 
-    # Set up logging.
-    logging.basicConfig(format="%(asctime)s %(message)s")
-    logging.getLogger().setLevel(getattr(logging, options["loglevel"].upper()))
+    # Save parsed options.
+    save()
 
     # Set up the Twitter API object.
     api = Api(**dict([(k, v) for k, v in options.items()
                       if k.split("_")[0] in ("consumer", "access")]))
 
+    # Set up word files.
+    dictionary = wordfile("dictionary.txt")
+    stopwords = wordfile("stopwords.txt")
+
+    # Set up logging.
+    logging.basicConfig(format="%(asctime)s %(message)s")
+    logging.getLogger().setLevel(getattr(logging, options["loglevel"].upper()))
+
+    return parsed_options
+
+def destroy():
+    print
+    print "WARNING: You have specified the --DESTROY option."
+    print "All tweets will be deleted from your account."
+    if raw_input("Enter 'y' to continue. ").strip().lower() == "y":
+        print "Deleting all data and tweets."
+        try:
+            remove(DATA_PATH)
+        except OSError:
+            pass
+        while True:
+            tweets = api.GetUserTimeline()
+            if not tweets:
+                break
+            for tweet in tweets:
+                try:
+                   api.DestroyStatus(tweet.id)
+                except TwitterError:
+                    pass
+        print "Done."
+    else:
+        print "--DESTROY aborted"
+
+def get_new_entries():
+    """
+    Load the RSS feed in reverse order and return new entries.
+    """
+    entries = []
+    feed = parse(options["feed_url"])
+    try:
+        logging.error("Feed error: %s" % feed["bozo_exception"])
+    except KeyError:
+        pass
+    for entry in reversed(feed.entries):
+        # Ignore entries that match an ignore string, can't fit
+        # into a tweet, or are already in "todo" or "done".
+        ignored = [s for s in options["ignore"].split(",")
+                   if s and s.lower() in entry["title"].lower()]
+        if ignored:
+            logging.debug("Ignore strings (%s) found in: %s" %
+                          (", ".join(ignored), entry["title"]))
+        elif len(entry["title"]) > TWEET_MAX_LEN:
+            logging.debug("Entry too long: %s" % entry["title"])
+        else:
+            todo = [t["id"] for t in data["todo"]]
+            if entry["id"] not in todo and entry["id"] not in data["done"]:
+                entries.append({"id": entry["id"], "title": entry["title"]})
+    return entries
+
+def possible_hashtags_for_word(words, i):
+    """
+    Return up to 4 possible hashtags with combinations of the next
+    and previous words for the given index.
+    """
+    possible_hashtags = [words[i]]
+    valid_prev = i > 0 and words[i-1] not in stopwords
+    valid_next = i < len(words) - 1 and words[i+1] not in stopwords
+    if valid_prev:
+        # Combined with previous word.
+        possible_hashtags.append(words[i-1] + words[i])
+    if valid_next:
+        # Combined with next word.
+        possible_hashtags.append(words[i] + words[i+1])
+    if valid_prev and valid_next:
+        # Combined with previous and next words.
+        possible_hashtags.append(words[i-1] + words[i] + words[i+1])
+    return possible_hashtags
+
+def best_hashtag_with_score(possible_hashtags):
+    """
+    Given possible hashtags, calculate a score for each based on the
+    time since epoch of each search result for the hashtag, and return
+    the highest scoring hashtag/score pair.
+    """
+    best_hashtag = None
+    highest_score = 0
+    for hashtag in possible_hashtags:
+        if len(hashtag) >= options["hashtag_len_min"]:
+            try:
+                results = api.GetSearch("#" + hashtag)
+            except TwitterError, e:
+                logging.error("Twitter error: %s" % e)
+            else:
+                score = sum([t.created_at_in_seconds for t in results])
+                logging.debug("Score for '%s': %s" % (hashtag, score))
+                if score > highest_score:
+                    highest_score = score
+                    best_hashtag = hashtag
+    return best_hashtag, highest_score
+
+def tweet_with_hashtags(tweet):
+    """
+    Parses hashtags from the given tweet and adds them to the
+    returned tweet.
+
+    Steps:
+
+    1) Go through every word in the tweet and if non-dictionary and
+       non-numeric, create up to 4 possible hashtags from it, the word
+       combined with the previous word, the next word, both previous
+       and next words together, and the word itself. Only use previous
+       and next words that aren't stopwords.
+    2) Ignore all the possible hashtags from the word if any of
+       them have already been added as hashtags, eg via the previous
+       or next word iteration, or a duplicate word.
+    3) Search for the possible hashtags via the API, giving each a
+       score based on the sum of the seconds since epoch for each
+       search result, and pick the highest scoring hashtag to use from
+       the possibilites for that word.
+    4) Sort the chosen hashtags found for all words by score, and add
+       as many as possible to the tweet within its length limit.
+    """
+
+    logging.debug("Getting hashtags for: %s" % tweet)
+    # String for word list - treat dashes and slashes as separators.
+    cleaned = tweet.lower().replace("-", " ").replace("/", " ")
+    # Initial list of alphanumeric words.
+    words = "".join([c for c in cleaned if c.isalnum() or c == " "]).split()
+    # All hashtags mapped to scores.
+    hashtags = {}
+    for i, word in enumerate(words):
+        if not (word.isdigit() or word in dictionary):
+            possible_hashtags = possible_hashtags_for_word(words, i)
+            logging.debug("Possible hashtags for the word '%s': %s" %
+                          (word, ", ".join(possible_hashtags)))
+            # Check none of the possibilities have been used.
+            used = [t for t in possible_hashtags if t in hashtags.keys()]
+            if used:
+                logging.debug("Possible hashtags already used")
+            else:
+                hashtag, score = best_hashtag_with_score(possible_hashtags)
+                if hashtag is not None:
+                    hashtags[hashtag] = score
+
+    # Sort hashtags by score and add to tweet.
+    hashtags = sorted(hashtags.keys(), key=lambda k: hashtags[k], reverse=True)
+    logging.debug("Hashtags chosen: %s" % (", ".join(hashtags)
+                                           if hashtags else "None"))
+    for hashtag in hashtags:
+        hashtag = " #" + hashtag
+        if len(tweet + hashtag) <= TWEET_MAX_LEN:
+            tweet += hashtag
+    return tweet
+
+def main():
+    """
+    Get the entries from the feed and go through them, oldest first,
+    adding them to the "todo" queue. Then take the first from the queue
+    and post it to Twitter. Finally pause for a given time period between
+    the min/max delay options.
+    """
+    parsed_options = configure()
     # Reset all data and delete tweets if specified.
     if parsed_options.destroy:
-        print
-        print "WARNING: You have specified the --DESTROY option."
-        print "All tweets will be deleted from your account."
-        if raw_input("Enter 'y' to continue. ").strip().lower() == "y":
-            print "Deleting all data and tweets."
-            try:
-                remove(DATA_PATH)
-            except OSError:
-                pass
-            while True:
-                tweets = api.GetUserTimeline()
-                if not tweets:
-                    break
-                for tweet in tweets:
-                    try:
-                       api.DestroyStatus(tweet.id)
-                    except TwitterError:
-                        pass
-            print "Done."
-            exit()
-        else:
-            print "--DESTROY aborted"
-
+        destroy()
+        exit()
+    # Main loop.
     while True:
-
-        # Go through the feed's entries, oldest first, and add new
-        # entries to the "todo" list.
-        todo = []
-        feed = parse(options["feed_url"])
-        try:
-            logging.error("Feed error: %s" % feed["bozo_exception"])
-        except KeyError:
-            pass
-        for entry in reversed(feed.entries):
-            # Ignore entries that match an ignore string, can't fit
-            # into a tweet, or are already in "todo" or "done".
-            in_ignore = [s for s in options["ignore"].split(",")
-                         if s and s.lower() in entry["title"].lower()]
-            len_ok = len(entry["title"]) <= TWEET_MAX_LEN
-            in_todo = entry["id"] in [t["id"] for t in data["todo"]]
-            in_done = entry["id"] in data["done"]
-            if not in_ignore and len_ok and not in_todo and not in_done:
-                todo.append({"id": entry["id"], "title": entry["title"]})
-            elif in_ignore:
-                logging.debug("Ignore strings (%s) found in: %s" %
-                              (", ".join(in_ignore), entry["title"]))
-            elif not len_ok:
-                logging.debug("Entry too long: %s" % entry["title"])
-        # Save the data file if new entries found.
-        if todo:
-            logging.debug("New entries in the queue: %s" % len(todo))
-            data["todo"].extend(todo)
-            if not parsed_options.dry_run:
-                with open(DATA_PATH, "wb") as f:
-                    dump(data, f)
-        total = len(data["todo"])
-        if total:
-            logging.debug("Total entries in the queue: %s" % total)
-
+        # Get new entries and save the data file if new entries found.
+        new_entries = get_new_entries()
+        if new_entries:
+            logging.debug("New entries in the queue: %s" % len(new_entries))
+            data["todo"].extend(new_entries)
+            save(dry_run=parsed_options.dry_run)
+        total_todo = len(data["todo"])
+        if total_todo:
+            logging.debug("Total entries in the queue: %s" % total_todo)
         # Process the first entry in the "todo" list.
         if data["todo"]:
-
-            tweet = data["todo"][0]["title"]
-
-            # Add hashtags.
-            #
-            # 1) Get a list of non-dictionary words from the tweet
-            #    with only alpha-numeric characters.
-            # 2) Go through every word and if not a dictionary word,
-            #    create up to 3 possible tags from it, the word
-            #    combined with the previous word, the next word, and
-            #    just the word itself. Only use previous/next words
-            #    that aren't stopwords.
-            # 3) Ignore all possible hashtags from the word if any of
-            #    them have already been added as hashtags, eg via the
-            #    previous or next word iteration, or a duplicate.
-            # 4) Search for the possible hashtags via the API, giving
-            #    each a score based on the sum of the seconds since
-            #    epoch for each search result, and pick the highest
-            #    scoring hashtag to use.
-            # 5) Sort the hashtags found by score, and add as many as
-            #    possible to the tweet within its length limit.
-
-            # Initial word list.
-            words = "".join([c for c in tweet.lower().replace("-", " ")
-                                                     .replace("/", " ")
-                             if c.isalnum() or c == " "]).split()
-            hashtags = {}
-            logging.debug("Getting hashtags for: %s" % tweet)
-            for i, word in enumerate(words):
-                if not (word.isdigit() or word in dictionary):
-                    possibles = [word]
-                    prev = i > 0 and words[i-1] not in stopwords
-                    next = i < len(words) - 1 and words[i+1] not in stopwords
-                    if prev:
-                        # Combined with previous word.
-                        possibles.append(words[i-1] + word)
-                    if next:
-                        # Combined with next word.
-                        possibles.append(word + words[i+1])
-                    if prev and next:
-                        # Combined with previous and next words.
-                        possibles.append(words[i-1] + word + words[i+1])
-                    logging.debug("Possible hashtags for the word '%s': %s" %
-                                  (word, ", ".join(possibles)))
-                    # Check none of the possibilities have been used.
-                    if [p for p in possibles if p in hashtags.keys()]:
-                        logging.debug("Possible hashtags already used")
-                    else:
-                        highest = 0
-                        hashtag = None
-                        for possible in possibles:
-                            if len(possible) >= options["hashtag_len_min"]:
-                                try:
-                                    results = api.GetSearch("#" + possible)
-                                except TwitterError, e:
-                                    logging.error("Twitter error: %s" % e)
-                                else:
-                                    score = sum([t.created_at_in_seconds
-                                                 for t in results])
-                                    logging.debug("Score for '%s': %s" %
-                                                  (possible, score))
-                                    if score > highest:
-                                        highest = score
-                                        hashtag = possible
-                        if hashtag:
-                            hashtags[hashtag] = score
-
-            # Sort hashtags by score and add to tweet.
-            sort = lambda k: hashtags[k]
-            hashtags = sorted(hashtags.keys(), key=sort, reverse=True)
-            logging.debug("Hashtags chosen: %s" % (", ".join(hashtags)
-                                                   if hashtags else "None"))
-            for hashtag in hashtags:
-                hashtag = " #" + hashtag
-                if len(tweet + hashtag) <= TWEET_MAX_LEN:
-                    tweet += hashtag
-
+            tweet = tweet_with_hashtags(data["todo"][0]["title"])
             # Post to Twitter.
             done = True
             try:
@@ -273,10 +311,7 @@ def main():
                 logging.info("Tweeted: %s" % tweet)
                 # Move the entry from "todo" to "done" and save the data file.
                 data["done"].add(data["todo"].pop(0)["id"])
-                if not parsed_options.dry_run:
-                    with open(DATA_PATH, "wb") as f:
-                        dump(data, f)
-
+                save(dry_run=parsed_options.dry_run)
         # Pause between tweets - pause also occurs when no new entries
         # are found so that we don't hammer the feed URL.
         delay = randint(int(options["delay_min"]), int(options["delay_max"]))
