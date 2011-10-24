@@ -56,6 +56,9 @@ def main():
     parser.add_option("--loglevel", dest="loglevel",
                       default="info", choices=("error", "info", "debug"),
                       help="Level of information printed")
+    parser.add_option("--dry-run", dest="dry_run",
+                      default=False, action="store_true",
+                      help="Fake run without posting any tweets")
     parser.add_option("--DESTROY", dest="destroy",
                       default=False, action="store_true",
                       help="Deletes all saved data and tweets from Twitter")
@@ -102,6 +105,9 @@ def main():
                 if value is not None:
                     data["options"][option.dest] = value
         options = data["options"]
+    # Save parsed options.
+    with open(DATA_PATH, "wb") as f:
+        dump(data, f)
 
     # Set up logging.
     logging.basicConfig(format="%(asctime)s %(message)s")
@@ -157,8 +163,9 @@ def main():
         if todo:
             logging.debug("New entries in the queue: %s" % len(todo))
             data["todo"].extend(todo)
-            with open(DATA_PATH, "wb") as f:
-                dump(data, f)
+            if not parsed_options.dry_run:
+                with open(DATA_PATH, "wb") as f:
+                    dump(data, f)
         total = len(data["todo"])
         if total:
             logging.debug("Total entries in the queue: %s" % total)
@@ -231,7 +238,7 @@ def main():
             sort = lambda k: hashtags[k]
             hashtags = sorted(hashtags.keys(), key=sort, reverse=True)
             logging.debug("Hashtags found: %s" % (", ".join(hashtags)
-                                                  if hashtags else "none"))
+                                                  if hashtags else "None"))
             for hashtag in hashtags:
                 hashtag = " #" + hashtag
                 if len(tweet + hashtag) <= TWEET_MAX_LEN:
@@ -240,7 +247,8 @@ def main():
             # Post to Twitter.
             done = True
             try:
-                api.PostUpdate(tweet)
+                if not parsed_options.dry_run:
+                    api.PostUpdate(tweet)
             except TwitterError, e:
                 logging.error("Twitter error: %s" % e)
                 # Make the entry as done if it's a duplicate.
@@ -249,8 +257,9 @@ def main():
                 logging.info("Tweeted: %s" % tweet)
                 # Move the entry from "todo" to "done" and save the data file.
                 data["done"].add(data["todo"].pop(0)["id"])
-                with open(DATA_PATH, "wb") as f:
-                    dump(data, f)
+                if not parsed_options.dry_run:
+                    with open(DATA_PATH, "wb") as f:
+                        dump(data, f)
 
         # Pause between tweets - pause also occurs when no new entries
         # are found so that we don't hammer the feed URL.
