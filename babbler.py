@@ -6,7 +6,6 @@ as hashtags.
 
 from __future__ import with_statement
 from cPickle import dump, load
-from datetime import datetime
 import logging
 from optparse import OptionParser
 from os import getcwd, remove
@@ -19,7 +18,6 @@ from twitter import Api, TwitterError
 
 
 __version__ = "0.1"
-
 
 DATA_PATH = join(getcwd(), "babbler.data")
 TWEET_MAX_LEN = 140
@@ -144,7 +142,7 @@ def destroy():
                 break
             for tweet in tweets:
                 try:
-                   api.DestroyStatus(tweet.id)
+                    api.DestroyStatus(tweet.id)
                 except TwitterError:
                     pass
         print "Done."
@@ -286,44 +284,43 @@ def main():
     if parsed_options.destroy:
         destroy()
         exit()
-    # Main loop.
-    while True:
-        # Get new entries and save the data file if new entries found.
-        new_entries = get_new_entries()
-        if new_entries:
-            logging.debug("New entries in the queue: %s" % len(new_entries))
-            data["todo"].extend(new_entries)
-            save(dry_run=parsed_options.dry_run)
-        total_todo = len(data["todo"])
-        if total_todo:
-            logging.debug("Total entries in the queue: %s" % total_todo)
-        # Process the first entry in the "todo" list.
-        if data["todo"]:
-            tweet = tweet_with_hashtags(data["todo"][0]["title"])
-            # Post to Twitter.
-            done = True
-            try:
-                if not parsed_options.dry_run:
-                    api.PostUpdate(tweet)
-            except TwitterError, e:
-                logging.error("Twitter error: %s" % e)
-                # Make the entry as done if it's a duplicate.
-                done = str(e) == "Status is a duplicate."
-            if done:
-                logging.info("Tweeted: %s" % tweet)
-                # Move the entry from "todo" to "done" and save the data file.
-                data["done"].add(data["todo"].pop(0)["id"])
-                save(dry_run=parsed_options.dry_run)
-        # Pause between tweets - pause also occurs when no new entries
-        # are found so that we don't hammer the feed URL.
-        delay = randint(int(options["delay_min"]), int(options["delay_max"]))
-        logging.debug("Pausing for %s seconds" % delay)
-        sleep(delay)
-
-
-if __name__ == "__main__":
     try:
-        main()
+        while True:
+            # Get new entries and save the data file if new entries found.
+            new_entries = get_new_entries()
+            if new_entries:
+                logging.debug("New entries in the queue: %s" % len(new_entries))
+                data["todo"].extend(new_entries)
+                save(dry_run=parsed_options.dry_run)
+            total_todo = len(data["todo"])
+            if total_todo:
+                logging.debug("Total entries in the queue: %s" % total_todo)
+            # Process the first entry in the "todo" list.
+            if data["todo"]:
+                tweet = tweet_with_hashtags(data["todo"][0]["title"])
+                # Post to Twitter.
+                done = True
+                try:
+                    if not parsed_options.dry_run:
+                        api.PostUpdate(tweet)
+                except TwitterError, e:
+                    logging.error("Twitter error: %s" % e)
+                    # Mark the entry as done if it's a duplicate.
+                    done = str(e) == "Status is a duplicate."
+                if done:
+                    logging.info("Tweeted: %s" % tweet)
+                    # Move the entry from "todo" to "done" and save.
+                    data["done"].add(data["todo"].pop(0)["id"])
+                    save(dry_run=parsed_options.dry_run)
+            # Pause between tweets - pause also occurs when no new entries
+            # are found so that we don't hammer the feed URL.
+            delay = randint(int(options["delay_min"]), int(options["delay_max"]))
+            logging.debug("Pausing for %s seconds" % delay)
+            sleep(delay)
     except KeyboardInterrupt:
         print
         print "Quitting"
+
+
+if __name__ == "__main__":
+    main()
