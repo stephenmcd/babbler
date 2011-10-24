@@ -53,6 +53,9 @@ def main():
     parser.add_option("--delay-max", dest="delay_max",
                       default=60*40,
                       help="Maximum number of seconds between posts")
+    parser.add_option("--ignore", dest="ignore",
+                      default="",
+                      help="Comma separated strings for ignoring feed entries")
     parser.add_option("--loglevel", dest="loglevel",
                       default="info", choices=("error", "info", "debug"),
                       help="Level of information printed")
@@ -153,12 +156,20 @@ def main():
         except KeyError:
             pass
         for entry in reversed(feed.entries):
-            # Ignore entries that can't fit into a tweet, or are
-            # already in "todo" or "done".
-            if (len(entry["title"]) <= TWEET_MAX_LEN and
-                entry["id"] not in [t["id"] for t in data["todo"]] and
-                entry["id"] not in data["done"]):
+            # Ignore entries that match an ignore string, can't fit
+            # into a tweet, or are already in "todo" or "done".
+            in_ignore = [s for s in options["ignore"].split(",")
+                         if s and s.lower() in entry["title"].lower()]
+            len_ok = len(entry["title"]) <= TWEET_MAX_LEN
+            in_todo = entry["id"] in [t["id"] for t in data["todo"]]
+            in_done = entry["id"] in data["done"]
+            if not in_ignore and len_ok and not in_todo and not in_done:
                 todo.append({"id": entry["id"], "title": entry["title"]})
+            elif in_ignore:
+                logging.debug("Ignore strings (%s) found in: %s" %
+                              (", ".join(in_ignore), entry["title"]))
+            elif not len_ok:
+                logging.debug("Entry too long: %s" % entry["title"])
         # Save the data file if new entries found.
         if todo:
             logging.debug("New entries in the queue: %s" % len(todo))
@@ -196,6 +207,7 @@ def main():
 
             # Initial word list.
             words = "".join([c for c in tweet.lower().replace("-", " ")
+                                                     .replace("/", " ")
                              if c.isalnum() or c == " "]).split()
             hashtags = {}
             logging.debug("Getting hashtags for: %s" % tweet)
