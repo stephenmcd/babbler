@@ -169,15 +169,17 @@ def get_new_entries():
         if ignored:
             logging.debug("Ignore strings (%s) found in: %s" %
                           (", ".join(ignored), entry["title"]))
+            data["done"].add(entry["id"])
         elif len(entry["title"]) > TWEET_MAX_LEN:
             logging.debug("Entry too long: %s" % entry["title"])
+            data["done"].add(entry["id"])
         else:
             todo = [t["id"] for t in data["todo"]]
             if entry["id"] not in todo and entry["id"] not in data["done"]:
                 entries.append({"id": entry["id"], "title": entry["title"]})
     return entries
 
-def possible_hashtags_for_word(words, i):
+def possible_hashtags_for_index(words, i):
     """
     Return up to 4 possible hashtags with combinations of the next
     and previous words for the given index.
@@ -250,7 +252,7 @@ def tweet_with_hashtags(tweet):
     hashtags = {}
     for i, word in enumerate(words):
         if not (word.isdigit() or word in dictionary):
-            possible_hashtags = possible_hashtags_for_word(words, i)
+            possible_hashtags = possible_hashtags_for_index(words, i)
             logging.debug("Possible hashtags for the word '%s': %s" %
                           (word, ", ".join(possible_hashtags)))
             # Check none of the possibilities have been used.
