@@ -202,23 +202,30 @@ def main():
             for i, word in enumerate(words):
                 if word not in dictionary:
                     possibles = [word]
-                    if i > 0 and words[i-1] not in stopwords:
+                    prev = i > 0 and words[i-1] not in stopwords
+                    next = i < len(words) - 1 and words[i+1] not in stopwords
+                    if prev:
                         # Combined with previous word.
                         possibles.append(words[i-1] + word)
-                    if i < len(words) - 1 and words[i+1] not in stopwords:
+                    if next:
                         # Combined with next word.
                         possibles.append(word + words[i+1])
-                    logging.debug("Possible hashtags from the word '%s': %s" %
+                    if prev and next:
+                        # Combined with previous and next words.
+                        possibles.append(words[i-1] + word + words[i+1])
+                    logging.debug("Possible hashtags for the word '%s': %s" %
                                   (word, ", ".join(possibles)))
                     # Check none of the possibilities have been used.
-                    if [p for p in possibles if p in hashtags.keys()]:
+                    used = any([p for p in possibles if p in hashtags.keys()])
+                    if used:
                         logging.debug("Possible hashtags already used")
                     else:
                         highest = 0
                         hashtag = None
                         for possible in possibles:
-                            if (len(possible) >= options["hashtag_len_min"] and
-                                [c for c in possible if c.isalpha()]):
+                            len_ok = len(possible) >= options["hashtag_len_min"]
+                            has_alpha = [c for c in possible if c.isalpha()]
+                            if len_ok and has_alpha:
                                 try:
                                     results = api.GetSearch("#" + possible)
                                 except TwitterError, e:
@@ -237,8 +244,8 @@ def main():
             # Sort hashtags by score and add to tweet.
             sort = lambda k: hashtags[k]
             hashtags = sorted(hashtags.keys(), key=sort, reverse=True)
-            logging.debug("Hashtags found: %s" % (", ".join(hashtags)
-                                                  if hashtags else "None"))
+            logging.debug("Hashtags chosen: %s" % (", ".join(hashtags)
+                                                   if hashtags else "None"))
             for hashtag in hashtags:
                 hashtag = " #" + hashtag
                 if len(tweet + hashtag) <= TWEET_MAX_LEN:
