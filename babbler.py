@@ -11,7 +11,7 @@ from optparse import OptionParser
 from os import getcwd, remove
 from os.path import join, dirname
 from random import randint
-from time import sleep
+from time import sleep, time
 
 from feedparser import parse
 from twitter import Api, TwitterError
@@ -49,23 +49,20 @@ def configure():
     parser.add_option("--hashtag-length-min", dest="hashtag_len_min",
                       default=3,
                       help="Minimum length of a hashtag")
-    parser.add_option("--delay-min", dest="delay_min",
-                      default=60*20,
-                      help="Minimum number of seconds between posts")
-    parser.add_option("--delay-max", dest="delay_max",
-                      default=60*40,
-                      help="Maximum number of seconds between posts")
+    parser.add_option("--delay", dest="delay",
+                      default=600,
+                      help="Number of seconds between RSS feed requests")
     parser.add_option("--ignore", dest="ignore",
                       default="",
                       help="Comma separated strings for ignoring feed entries")
     parser.add_option("--loglevel", dest="loglevel",
                       default="info", choices=("error", "info", "debug"),
                       help="Level of information printed")
-    parser.add_option("--dry-run", dest="dry_run",
-                      default=False, action="store_true",
+    parser.add_option("--dry-run", dest="dry_run", action="store_true",
+                      default=False,
                       help="Fake run without posting any tweets")
-    parser.add_option("--DESTROY", dest="destroy",
-                      default=False, action="store_true",
+    parser.add_option("--DESTROY", dest="destroy", action="store_true",
+                      default=False,
                       help="Deletes all saved data and tweets from Twitter")
     parser.add_option("--feed-url", dest="feed_url",
                       help="RSS Feed URL")
@@ -127,6 +124,10 @@ def configure():
     return parsed_options
 
 def destroy():
+    """
+    Destroys persisted data file and deletes all tweets from Twitter
+    when the --DESTROY option is given.
+    """
     print
     print "WARNING: You have specified the --DESTROY option."
     print "All tweets will be deleted from your account."
@@ -151,7 +152,7 @@ def destroy():
 
 def get_new_entries():
     """
-    Load the RSS feed in reverse order and return new entries.
+    Loads the RSS feed in reverse order and return new entries.
     """
     entries = []
     feed = parse(options["feed_url"])
@@ -159,27 +160,27 @@ def get_new_entries():
         logging.error("Feed error: %s" % feed["bozo_exception"])
     except KeyError:
         pass
+    saved = set([t["id"] for t in data["todo"]]) | data["done"]
     for entry in reversed(feed.entries):
-        # Ignore entries that match an ignore string, can't fit
-        # into a tweet, or are already in "todo" or "done".
-        ignored = [s for s in options["ignore"].split(",")
-                   if s and s.lower() in entry["title"].lower()]
-        if ignored:
-            logging.debug("Ignore strings (%s) found in: %s" %
-                          (", ".join(ignored), entry["title"]))
-            data["done"].add(entry["id"])
-        elif len(entry["title"]) > TWEET_MAX_LEN:
-            logging.debug("Entry too long: %s" % entry["title"])
-            data["done"].add(entry["id"])
-        else:
-            todo = [t["id"] for t in data["todo"]]
-            if entry["id"] not in todo and entry["id"] not in data["done"]:
+        if entry["id"] not in saved:
+            # Ignore entries that match an ignore string, can't fit
+            # into a tweet, or are already in "todo" or "done".
+            ignored = [s for s in options["ignore"].split(",")
+                       if s and s.lower() in entry["title"].lower()]
+            if ignored:
+                logging.debug("Ignore strings (%s) found in: %s" %
+                              (", ".join(ignored), entry["title"]))
+                data["done"].add(entry["id"])
+            elif len(entry["title"]) > TWEET_MAX_LEN:
+                logging.debug("Entry too long: %s" % entry["title"])
+                data["done"].add(entry["id"])
+            else:
                 entries.append({"id": entry["id"], "title": entry["title"]})
     return entries
 
 def possible_hashtags_for_index(words, i):
     """
-    Return up to 4 possible hashtags with combinations of the next
+    Returns up to 4 possible hashtags with combinations of the next
     and previous words for the given index.
     """
     possible_hashtags = [words[i]]
@@ -198,8 +199,8 @@ def possible_hashtags_for_index(words, i):
 
 def best_hashtag_with_score(possible_hashtags):
     """
-    Given possible hashtags, calculate a score for each based on the
-    time since epoch of each search result for the hashtag, and return
+    Given possible hashtags, calculates a score for each based on the
+    time since epoch of each search result for the hashtag, and returns
     the highest scoring hashtag/score pair.
     """
     best_hashtag = None
@@ -274,10 +275,11 @@ def tweet_with_hashtags(tweet):
 
 def main():
     """
-    Get the entries from the feed and go through them, oldest first,
-    adding them to the "todo" queue. Then take the first from the queue
-    and post it to Twitter. Finally pause for a given time period between
-    the min/max delay options.
+    Main event loop that gets the entries from the feed and goes through
+    them, oldest first, adding them to the "todo" queue. Then takes the
+    first from the queue and posts it to Twitter. Finally pauses for the
+    amount of time estimated to flush the "todo" queue by the time the
+    feed is requested again.
     """
     parsed_options = configure()
     # Reset all data and delete tweets if specified.
@@ -285,16 +287,22 @@ def main():
         destroy()
         exit()
     try:
+        last = 0
         while True:
-            # Get new entries and save the data file if new entries found.
-            new_entries = get_new_entries()
-            if new_entries:
-                logging.debug("New entries in the queue: %s" % len(new_entries))
-                data["todo"].extend(new_entries)
-                save(dry_run=parsed_options.dry_run)
+            # Get new entries and save the data file if new entries found
+            # if the delay period has elapsed.
+            time_left = (last + int(options["delay"])) - time()
+            if time_left <= 0:
+                last = time()
+                time_left = int(options["delay"])
+                new_entries = get_new_entries()
+                logging.debug("New queued entries: %s" % len(new_entries))
+                if new_entries:
+                    data["todo"].extend(new_entries)
+                    save(dry_run=parsed_options.dry_run)
             total_todo = len(data["todo"])
             if total_todo:
-                logging.debug("Total entries in the queue: %s" % total_todo)
+                logging.debug("Total queued entries: %s" % total_todo)
             # Process the first entry in the "todo" list.
             if data["todo"]:
                 tweet = tweet_with_hashtags(data["todo"][0]["title"])
@@ -312,11 +320,13 @@ def main():
                     # Move the entry from "todo" to "done" and save.
                     data["done"].add(data["todo"].pop(0)["id"])
                     save(dry_run=parsed_options.dry_run)
-            # Pause between tweets - pause also occurs when no new entries
-            # are found so that we don't hammer the feed URL.
-            delay = randint(int(options["delay_min"]), int(options["delay_max"]))
-            logging.debug("Pausing for %s seconds" % delay)
-            sleep(delay)
+            # Pause for the estimated seconds required per tweet in the
+            # "todo" queue to flush the queue by the time the feed is
+            # next requested.
+            delay = int(time_left / (len(data["todo"]) + 1))
+            if delay:
+                logging.debug("Pausing for %s seconds" % delay)
+                sleep(delay)
     except KeyboardInterrupt:
         print
         print "Quitting"
