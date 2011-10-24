@@ -200,7 +200,7 @@ def main():
             hashtags = {}
             logging.debug("Getting hashtags for: %s" % tweet)
             for i, word in enumerate(words):
-                if word not in dictionary:
+                if not (word.isdigit() or word in dictionary):
                     possibles = [word]
                     prev = i > 0 and words[i-1] not in stopwords
                     next = i < len(words) - 1 and words[i+1] not in stopwords
@@ -216,16 +216,13 @@ def main():
                     logging.debug("Possible hashtags for the word '%s': %s" %
                                   (word, ", ".join(possibles)))
                     # Check none of the possibilities have been used.
-                    used = any([p for p in possibles if p in hashtags.keys()])
-                    if used:
+                    if [p for p in possibles if p in hashtags.keys()]:
                         logging.debug("Possible hashtags already used")
                     else:
                         highest = 0
                         hashtag = None
                         for possible in possibles:
-                            len_ok = len(possible) >= options["hashtag_len_min"]
-                            has_alpha = [c for c in possible if c.isalpha()]
-                            if len_ok and has_alpha:
+                            if len(possible) >= options["hashtag_len_min"]:
                                 try:
                                     results = api.GetSearch("#" + possible)
                                 except TwitterError, e:
