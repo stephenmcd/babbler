@@ -9,10 +9,11 @@ from cPickle import dump, load
 import logging
 from math import ceil
 from optparse import OptionParser
-from os import getcwd, remove
-from os.path import join, dirname
+from os import getcwd, kill, remove
+from os.path import dirname, join
 from time import sleep, time
 
+from daemon import daemonize
 from feedparser import parse
 from twitter import Api, TwitterError
 
@@ -20,6 +21,7 @@ from twitter import Api, TwitterError
 __version__ = "0.1"
 
 DATA_PATH = join(getcwd(), "babbler.data")
+PID_PATH = join(getcwd(), "babbler.pid")
 TWEET_MAX_LEN = 140
 
 
@@ -31,6 +33,7 @@ def wordfile(filename):
     with open(join(dirname(__file__), "wordfiles", filename)) as f:
         return set([s.strip() for s in f])
 
+
 def save(dry_run=False):
     """
     Persists the data file to disk.
@@ -38,6 +41,7 @@ def save(dry_run=False):
     if not dry_run:
         with open(DATA_PATH, "wb") as f:
             dump(data, f)
+
 
 def configure():
     """
@@ -61,15 +65,21 @@ def configure():
     parser.add_option("--dry-run", dest="dry_run", action="store_true",
                       default=False,
                       help="Fake run without posting any tweets")
+    parser.add_option("--daemonize", dest="daemonize", action="store_true",
+                      default=False,
+                      help="Run as a daemon")
+    parser.add_option("--kill", dest="kill", action="store_true",
+                      default=False,
+                      help="Kill a previously started daemon")
     parser.add_option("--DESTROY", dest="destroy", action="store_true",
                       default=False,
                       help="Deletes all saved data and tweets from Twitter")
     parser.add_option("--feed-url", dest="feed_url",
                       help="RSS Feed URL")
     parser.add_option("--consumer-key", dest="consumer_key",
-                      help="Twitter Application Consumer Key")
+                      help="Twitter Consumer Key")
     parser.add_option("--consumer-secret", dest="consumer_secret",
-                      help="Twitter Application Consumer Secret")
+                      help="Twitter Consumer Secret")
     parser.add_option("--access-token-key", dest="access_token_key",
                       help="Twitter Access Token Key")
     parser.add_option("--access-token-secret", dest="access_token_secret",
@@ -123,6 +133,7 @@ def configure():
 
     return parsed_options
 
+
 def destroy():
     """
     Destroys persisted data file and deletes all tweets from Twitter
@@ -149,6 +160,7 @@ def destroy():
         print "Done."
     else:
         print "--DESTROY aborted"
+
 
 def get_new_entries():
     """
@@ -178,24 +190,26 @@ def get_new_entries():
                 entries.append({"id": entry["id"], "title": entry["title"]})
     return entries
 
+
 def possible_hashtags_for_index(words, i):
     """
     Returns up to 4 possible hashtags with combinations of the next
     and previous words for the given index.
     """
     possible_hashtags = [words[i]]
-    valid_prev = i > 0 and words[i-1] not in stopwords
-    valid_next = i < len(words) - 1 and words[i+1] not in stopwords
+    valid_prev = i > 0 and words[i - 1] not in stopwords
+    valid_next = i < len(words) - 1 and words[i + 1] not in stopwords
     if valid_prev:
         # Combined with previous word.
-        possible_hashtags.append(words[i-1] + words[i])
+        possible_hashtags.append(words[i - 1] + words[i])
     if valid_next:
         # Combined with next word.
-        possible_hashtags.append(words[i] + words[i+1])
+        possible_hashtags.append(words[i] + words[i + 1])
     if valid_prev and valid_next:
         # Combined with previous and next words.
-        possible_hashtags.append(words[i-1] + words[i] + words[i+1])
+        possible_hashtags.append(words[i - 1] + words[i] + words[i + 1])
     return possible_hashtags
+
 
 def best_hashtag_with_score(possible_hashtags):
     """
@@ -218,6 +232,7 @@ def best_hashtag_with_score(possible_hashtags):
                     highest_score = score
                     best_hashtag = hashtag
     return best_hashtag, highest_score
+
 
 def tweet_with_hashtags(tweet):
     """
@@ -273,7 +288,8 @@ def tweet_with_hashtags(tweet):
             tweet += hashtag
     return tweet
 
-def main():
+
+def run(dry_run):
     """
     Main event loop that gets the entries from the feed and goes through
     them, oldest first, adding them to the "todo" queue. Then takes the
@@ -281,54 +297,83 @@ def main():
     amount of time estimated to flush the "todo" queue by the time the
     feed is requested again.
     """
-    parsed_options = configure()
-    # Reset all data and delete tweets if specified.
-    if parsed_options.destroy:
-        destroy()
-        exit()
+    last_feed_time = 0
+    while True:
+        # Get new entries and save the data file if new entries found
+        # if the delay period has elapsed.
+        if ((last_feed_time + int(options["delay"])) - time()) <= 0:
+            last_feed_time = time()
+            new_entries = get_new_entries()
+            logging.debug("New queued entries: %s" % len(new_entries))
+            if new_entries:
+                data["todo"].extend(new_entries)
+                save(dry_run=dry_run)
+            # Update the time to sleep - use the delay option unless
+            # there are items in the "todo" queue, otherwise set the
+            # delay to consume a third of the queue size before the
+            # next feed request.
+            delay = int(options["delay"])
+            if data["todo"]:
+                delay = int(delay / ceil(len(data["todo"]) / 3.))
+        if data["todo"]:
+            logging.debug("Total queued entries: %s" % len(data["todo"]))
+        # Process the first entry in the "todo" list.
+        if data["todo"]:
+            tweet = tweet_with_hashtags(data["todo"][0]["title"])
+            # Post to Twitter.
+            done = True
+            try:
+                if not dry_run:
+                    api.PostUpdate(tweet)
+            except TwitterError, e:
+                logging.error("Twitter error: %s" % e)
+                # Mark the entry as done if it's a duplicate.
+                done = str(e) == "Status is a duplicate."
+            if done:
+                logging.info("Tweeted: %s" % tweet)
+                # Move the entry from "todo" to "done" and save.
+                data["done"].add(data["todo"].pop(0)["id"])
+                save(dry_run=dry_run)
+        logging.debug("Pausing for %s seconds" % delay)
+        sleep(delay)
+
+
+def kill_daemon():
+    """
+    Try to stop a previously started daemon.
+    """
     try:
-        last_feed_time = 0
-        while True:
-            # Get new entries and save the data file if new entries found
-            # if the delay period has elapsed.
-            if ((last_feed_time + int(options["delay"])) - time()) <= 0:
-                last_feed_time = time()
-                new_entries = get_new_entries()
-                logging.debug("New queued entries: %s" % len(new_entries))
-                if new_entries:
-                    data["todo"].extend(new_entries)
-                    save(dry_run=parsed_options.dry_run)
-                # Update the time to sleep - use the delay option unless
-                # there are items in the "todo" queue, otherwise set the
-                # delay to consume a third of the queue size before the
-                # next feed request.
-                delay = int(options["delay"])
-                if data["todo"]:
-                    delay = int(delay / ceil(len(data["todo"]) / 3.))
-            if data["todo"]:
-                logging.debug("Total queued entries: %s" % len(data["todo"]))
-            # Process the first entry in the "todo" list.
-            if data["todo"]:
-                tweet = tweet_with_hashtags(data["todo"][0]["title"])
-                # Post to Twitter.
-                done = True
-                try:
-                    if not parsed_options.dry_run:
-                        api.PostUpdate(tweet)
-                except TwitterError, e:
-                    logging.error("Twitter error: %s" % e)
-                    # Mark the entry as done if it's a duplicate.
-                    done = str(e) == "Status is a duplicate."
-                if done:
-                    logging.info("Tweeted: %s" % tweet)
-                    # Move the entry from "todo" to "done" and save.
-                    data["done"].add(data["todo"].pop(0)["id"])
-                    save(dry_run=parsed_options.dry_run)
-            logging.debug("Pausing for %s seconds" % delay)
-            sleep(delay)
-    except KeyboardInterrupt:
-        print
-        print "Quitting"
+        with open(PID_PATH) as f:
+            kill(int(f.read()), 9)
+        remove(PID_PATH)
+    except (IOError, OSError):
+        return False
+    return True
+
+
+def main():
+    """
+    Main entry point for program.
+    """
+    parsed_options = configure()
+    if parsed_options.destroy:
+        # Reset all data and delete tweets if specified.
+        destroy()
+    elif parsed_options.kill:
+        # Kill a previously started daemon.
+        if kill_daemon():
+            print "Daemon killed"
+        else:
+            print "Couldn't kill daemon"
+    elif parsed_options.daemonize:
+        # Start a new daemon.
+        kill_daemon()
+        daemonize(PID_PATH)
+        run(parsed_options.dry_run)
+        print "Daemon started"
+    else:
+        # Start in the foreground.
+        run(parsed_options.dry_run)
 
 
 if __name__ == "__main__":
