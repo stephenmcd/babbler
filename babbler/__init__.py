@@ -58,7 +58,6 @@ def configure():
                       default=600,
                       help="Number of seconds between RSS feed requests")
     parser.add_option("--ignore", dest="ignore",
-                      default="",
                       help="Comma separated strings for ignoring feed entries")
     parser.add_option("--loglevel", dest="loglevel",
                       default="info", choices=("error", "info", "debug"),
@@ -323,7 +322,7 @@ def run(dry_run):
             # delay to consume the portion of the queue size defined
             # by QUEUE_SLICE before the next feed request.
             delay = int(options["delay"])
-            if data["todo"] > QUEUE_SLICE * 10:
+            if len(data["todo"]) > QUEUE_SLICE * 10:
                 delay = int(delay / ceil(len(data["todo"]) * QUEUE_SLICE))
         # Process the first entry in the "todo" list.
         if data["todo"]:
