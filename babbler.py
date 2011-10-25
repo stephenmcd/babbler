@@ -7,10 +7,10 @@ as hashtags.
 from __future__ import with_statement
 from cPickle import dump, load
 import logging
+from math import ceil
 from optparse import OptionParser
 from os import getcwd, remove
 from os.path import join, dirname
-from random import randint
 from time import sleep, time
 
 from feedparser import parse
@@ -287,22 +287,26 @@ def main():
         destroy()
         exit()
     try:
-        last = 0
+        last_feed_time = 0
         while True:
             # Get new entries and save the data file if new entries found
             # if the delay period has elapsed.
-            time_left = (last + int(options["delay"])) - time()
-            if time_left <= 0:
-                last = time()
-                time_left = int(options["delay"])
+            if ((last_feed_time + int(options["delay"])) - time()) <= 0:
+                last_feed_time = time()
                 new_entries = get_new_entries()
                 logging.debug("New queued entries: %s" % len(new_entries))
                 if new_entries:
                     data["todo"].extend(new_entries)
                     save(dry_run=parsed_options.dry_run)
-            total_todo = len(data["todo"])
-            if total_todo:
-                logging.debug("Total queued entries: %s" % total_todo)
+                # Update the time to sleep - use the delay option unless
+                # there are items in the "todo" queue, otherwise set the
+                # delay to consume a third of the queue size before the
+                # next feed request.
+                delay = int(options["delay"])
+                if data["todo"]:
+                    delay = int(delay / ceil(len(data["todo"]) / 3.))
+            if data["todo"]:
+                logging.debug("Total queued entries: %s" % len(data["todo"]))
             # Process the first entry in the "todo" list.
             if data["todo"]:
                 tweet = tweet_with_hashtags(data["todo"][0]["title"])
@@ -320,13 +324,8 @@ def main():
                     # Move the entry from "todo" to "done" and save.
                     data["done"].add(data["todo"].pop(0)["id"])
                     save(dry_run=parsed_options.dry_run)
-            # Pause for the estimated seconds required per tweet in the
-            # "todo" queue to flush the queue by the time the feed is
-            # next requested.
-            delay = int(time_left / (len(data["todo"]) + 1))
-            if delay:
-                logging.debug("Pausing for %s seconds" % delay)
-                sleep(delay)
+            logging.debug("Pausing for %s seconds" % delay)
+            sleep(delay)
     except KeyboardInterrupt:
         print
         print "Quitting"
