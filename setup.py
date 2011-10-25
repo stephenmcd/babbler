@@ -1,5 +1,5 @@
 
-from setuptools import setup
+from setuptools import setup, find_packages
 
 import babbler
 
@@ -13,7 +13,8 @@ setup(
     long_description=open("README.rst").read(),
     license="BSD",
     url="http://github.com/stephenmcd/babbler/",
-    py_modules=["babbler"],
+    include_package_data=True,
+    packages=find_packages(),
     install_requires=[r.strip() for r in open("requirements.txt") if r],
     entry_points="""
         [console_scripts]
