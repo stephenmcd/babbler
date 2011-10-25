@@ -23,6 +23,7 @@ __version__ = "0.1"
 DATA_PATH = join(getcwd(), "babbler.data")
 PID_PATH = join(getcwd(), "babbler.pid")
 TWEET_MAX_LEN = 140
+QUEUE_SLICE = .3  # Fraction of the "todo" queue flushed during each run.
 
 
 def wordfile(filename):
@@ -193,22 +194,30 @@ def get_new_entries():
 
 def possible_hashtags_for_index(words, i):
     """
-    Returns up to 4 possible hashtags with combinations of the next
-    and previous words for the given index.
+    Returns up to 4 possible hashtags - all combinations of the next
+    and previous words for the given index. If the word has a
+    possessive apostrophe, run again using the singular form.
     """
-    possible_hashtags = [words[i]]
     valid_prev = i > 0 and words[i - 1] not in stopwords
     valid_next = i < len(words) - 1 and words[i + 1] not in stopwords
-    if valid_prev:
-        # Combined with previous word.
-        possible_hashtags.append(words[i - 1] + words[i])
-    if valid_next:
-        # Combined with next word.
-        possible_hashtags.append(words[i] + words[i + 1])
-    if valid_prev and valid_next:
-        # Combined with previous and next words.
-        possible_hashtags.append(words[i - 1] + words[i] + words[i + 1])
-    return possible_hashtags
+    base_words = [words[i]]
+    if words[i].endswith("'s"):
+        # Singular for possessive.
+        base_words.append(words[i][:-2])
+    possible_hashtags = []
+    for word in base_words:
+        possible_hashtags.append(word)
+        if valid_prev:
+            # Combined with previous word.
+            possible_hashtags.append(words[i - 1] + word)
+        if valid_next:
+            # Combined with next word.
+            possible_hashtags.append(word + words[i + 1])
+        if valid_prev and valid_next:
+            # Combined with previous and next words.
+            possible_hashtags.append(words[i - 1] + word + words[i + 1])
+    # Remove apostophes.
+    return [t.replace("'", "") for t in possible_hashtags]
 
 
 def best_hashtag_with_score(possible_hashtags):
@@ -261,10 +270,11 @@ def tweet_with_hashtags(tweet):
     # String for word list - treat dashes and slashes as separators.
     cleaned = tweet.lower().replace("-", " ").replace("/", " ")
     # Initial list of alphanumeric words.
-    words = "".join([c for c in cleaned if c.isalnum() or c == " "]).split()
+    words = "".join([c for c in cleaned if c.isalnum() or c in "' "]).split()
     # All hashtags mapped to scores.
     hashtags = {}
     for i, word in enumerate(words):
+        word = word.replace("'", "")
         if not (word.isdigit() or word in dictionary):
             possible_hashtags = possible_hashtags_for_index(words, i)
             logging.debug("Possible hashtags for the word '%s': %s" %
@@ -310,15 +320,14 @@ def run(dry_run):
                 save(dry_run=dry_run)
             # Update the time to sleep - use the delay option unless
             # there are items in the "todo" queue, otherwise set the
-            # delay to consume a third of the queue size before the
-            # next feed request.
+            # delay to consume the portion of the queue size defined
+            # by QUEUE_SLICE before the next feed request.
             delay = int(options["delay"])
-            if data["todo"]:
-                delay = int(delay / ceil(len(data["todo"]) / 3.))
-        if data["todo"]:
-            logging.debug("Total queued entries: %s" % len(data["todo"]))
+            if data["todo"] > QUEUE_SLICE * 10:
+                delay = int(delay / ceil(len(data["todo"]) * QUEUE_SLICE))
         # Process the first entry in the "todo" list.
         if data["todo"]:
+            logging.debug("Total queued entries: %s" % len(data["todo"]))
             tweet = tweet_with_hashtags(data["todo"][0]["title"])
             # Post to Twitter.
             done = True
@@ -373,7 +382,11 @@ def main():
         print "Daemon started"
     else:
         # Start in the foreground.
-        run(parsed_options.dry_run)
+        try:
+            run(parsed_options.dry_run)
+        except KeyboardInterrupt:
+            print
+            print "Quitting"
 
 
 if __name__ == "__main__":
