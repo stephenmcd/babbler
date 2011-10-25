@@ -1,2 +1,5 @@
 babbler.data
 babbler.pid
+babbler.egg-info/*
+build/*
+dist/*
