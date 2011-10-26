@@ -1,10 +1,10 @@
 """
-A Twitter bot that polls an RSS feed and posts the feed's titles at
-random intervals as tweets, extracting words from the titles to use
-as hashtags.
+A Twitter bot that polls an RSS feed and posts the feed's titles as
+tweets, extracting words from the titles to use as hashtags.
 """
 
 from __future__ import with_statement
+from code import interact
 from cPickle import dump, load
 import logging
 from math import ceil
@@ -102,6 +102,9 @@ def configure_and_load():
     parser.add_option_group(group)
 
     group = OptionGroup(parser, "Switches")
+    group.add_option("-e", "--edit-data",
+                     dest="edit_data", action="store_true", default=False,
+                     help="Load a Python shell for editing the data file")
     group.add_option("-f", "--dry-run",
                      dest="dry_run", action="store_true", default=False,
                      help="Fake run that doesn't save data or post tweets")
@@ -156,7 +159,7 @@ def configure_and_load():
             data["options"][option.dest] = value
 
     # Set up logging.
-    kwargs = {"format": "%(asctime)s %(message)s"}
+    kwargs = {"format": "%(asctime)-15s %(levelname)-5s %(message)s"}
     if data["options"]["daemonize"]:
         kwargs.update({"filename": LOG_PATH, "filemode": "wb"})
     logging.basicConfig(**kwargs)
@@ -200,6 +203,27 @@ def destroy():
         print "Done."
     else:
         print "--DESTROY aborted"
+
+
+def edit():
+    """
+    Runs a Python shell for editing the data file.
+    """
+    print
+    print "All data is stored in the dictionary named 'data' "
+    print "which contains the follwing entries:"
+    print
+    print "data['done'] = set()  # All entry IDs that have either been "
+    print "                      # posted to Twitter, or ignored. "
+    print "data['todo'] = []     # All entries that have been retrieved "
+    print "                      # from the feed and are waiting to be "
+    print "                      # posted to Twitter. Each dict contains "
+    print "                      # 'id' and 'title' keys."
+    print "data['options'] = {}  # All options that have been persisted. "
+    print
+    print "The 'save()' function can be called to persist any changes made."
+    print
+    interact(local=globals())
 
 
 def get_new_entries():
@@ -430,6 +454,9 @@ def main():
             print "Daemon killed"
         else:
             print "Couldn't kill daemon"
+    elif options["edit_data"]:
+        # Run a Python shell for editing data.
+        edit()
     elif options["daemonize"]:
         # Start a new daemon.
         kill_daemon()
