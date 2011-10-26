@@ -175,10 +175,12 @@ def get_new_entries():
     saved = set([t["id"] for t in data["todo"]]) | data["done"]
     for entry in reversed(feed.entries):
         if entry["id"] not in saved:
-            # Ignore entries that match an ignore string, can't fit
+            # Ignore entries that match any ignore string, can't fit
             # into a tweet, or are already in "todo" or "done".
-            ignored = [s for s in options["ignore"].split(",")
-                       if s and s.lower() in entry["title"].lower()]
+            ignored = []
+            if options["ignore"]:
+                ignored = [s for s in options["ignore"].split(",")
+                           if s and s.lower() in entry["title"].lower()]
             if ignored:
                 logging.debug("Ignore strings (%s) found in: %s" %
                               (", ".join(ignored), entry["title"]))
@@ -197,8 +199,8 @@ def possible_hashtags_for_index(words, i):
     and previous words for the given index. If the word has a
     possessive apostrophe, run again using the singular form.
     """
-    valid_prev = i > 0 and words[i - 1] not in stopwords
-    valid_next = i < len(words) - 1 and words[i + 1] not in stopwords
+    valid_prev = i > 0 and words[i - 1].lower() not in stopwords
+    valid_next = i < len(words) - 1 and words[i + 1].lower() not in stopwords
     base_words = [words[i]]
     if words[i].endswith("'s"):
         # Singular for possessive.
@@ -267,20 +269,20 @@ def tweet_with_hashtags(tweet):
 
     logging.debug("Getting hashtags for: %s" % tweet)
     # String for word list - treat dashes and slashes as separators.
-    cleaned = tweet.lower().replace("-", " ").replace("/", " ")
+    cleaned = tweet.replace("-", " ").replace("/", " ")
     # Initial list of alphanumeric words.
     words = "".join([c for c in cleaned if c.isalnum() or c in "' "]).split()
     # All hashtags mapped to scores.
     hashtags = {}
     for i, word in enumerate(words):
         word = word.replace("'", "")
-        if not (word.isdigit() or word in dictionary):
+        if not (word.isdigit() or word.lower() in dictionary):
             possible_hashtags = possible_hashtags_for_index(words, i)
             logging.debug("Possible hashtags for the word '%s': %s" %
                           (word, ", ".join(possible_hashtags)))
             # Check none of the possibilities have been used.
-            used = [t for t in possible_hashtags if t in hashtags.keys()]
-            if used:
+            used = [t.lower() for t in hashtags.keys()]
+            if [t.lower() for t in possible_hashtags if t in used]:
                 logging.debug("Possible hashtags already used")
             else:
                 hashtag, score = best_hashtag_with_score(possible_hashtags)
