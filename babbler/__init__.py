@@ -22,6 +22,7 @@ __version__ = "0.1"
 
 DATA_PATH = join(getcwd(), "babbler.data")
 PID_PATH = join(getcwd(), "babbler.pid")
+LOG_PATH = join(getcwd(), "babbler.log")
 TWEET_MAX_LEN = 140
 
 
@@ -155,11 +156,15 @@ def configure_and_load():
             data["options"][option.dest] = value
 
     # Set up logging.
-    logging.basicConfig(format="%(asctime)s %(message)s")
+    kwargs = {"format": "%(asctime)s %(message)s"}
+    if data["options"]["daemonize"]:
+        kwargs.update({"filename": LOG_PATH, "filemode": "wb"})
+    logging.basicConfig(**kwargs)
     log_level = getattr(logging, data["options"]["log_level"])
     logging.getLogger().setLevel(log_level)
+
     formatted_options = []
-    padding = len(max(data["options"].keys(), key=len)) + 4
+    padding = len(max(data["options"].keys(), key=len)) + 5
     for option in options:
         name = (option.dest + ": ").ljust(padding, ".")
         value = data["options"][option.dest]
