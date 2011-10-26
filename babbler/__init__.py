@@ -8,7 +8,7 @@ from __future__ import with_statement
 from cPickle import dump, load
 import logging
 from math import ceil
-from optparse import OptionParser
+from optparse import OptionGroup, OptionParser
 from os import getcwd, kill, remove
 from os.path import dirname, join
 from time import sleep, time
@@ -23,7 +23,6 @@ __version__ = "0.1"
 DATA_PATH = join(getcwd(), "babbler.data")
 PID_PATH = join(getcwd(), "babbler.pid")
 TWEET_MAX_LEN = 140
-QUEUE_SLICE = .3  # Fraction of the "todo" queue flushed during each run.
 
 
 def wordfile(filename):
@@ -44,94 +43,130 @@ def save(dry_run=False):
             dump(data, f)
 
 
-def configure():
+def configure_and_load():
     """
     Handles command-line arg parsing and loading of options and data.
     """
-    global options, data, api, dictionary, stopwords
 
-    parser = OptionParser(usage="usage: %prog [options]")
-    parser.add_option("--hashtag-length-min", dest="hashtag_len_min",
-                      default=3,
-                      help="Minimum length of a hashtag")
-    parser.add_option("--delay", dest="delay",
-                      default=600,
-                      help="Number of seconds between RSS feed requests")
-    parser.add_option("--ignore", dest="ignore",
-                      help="Comma separated strings for ignoring feed entries")
-    parser.add_option("--loglevel", dest="loglevel",
-                      default="info", choices=("error", "info", "debug"),
-                      help="Level of information printed")
-    parser.add_option("--dry-run", dest="dry_run", action="store_true",
-                      default=False,
-                      help="Fake run without posting any tweets")
-    parser.add_option("--daemonize", dest="daemonize", action="store_true",
-                      default=False,
-                      help="Run as a daemon")
-    parser.add_option("--kill", dest="kill", action="store_true",
-                      default=False,
-                      help="Kill a previously started daemon")
-    parser.add_option("--DESTROY", dest="destroy", action="store_true",
-                      default=False,
-                      help="Deletes all saved data and tweets from Twitter")
-    parser.add_option("--feed-url", dest="feed_url",
-                      help="RSS Feed URL")
-    parser.add_option("--consumer-key", dest="consumer_key",
-                      help="Twitter Consumer Key")
-    parser.add_option("--consumer-secret", dest="consumer_secret",
-                      help="Twitter Consumer Secret")
-    parser.add_option("--access-token-key", dest="access_token_key",
-                      help="Twitter Access Token Key")
-    parser.add_option("--access-token-secret", dest="access_token_secret",
-                      help="Twitter Access Token Secret")
-    (parsed_options, args) = parser.parse_args()
+    # Maintain defaults separately, since OptionParser doesn't provide
+    # a way of distinguishing between an option provided or a default
+    # used.
+    defaults = {
+        "ignore": [],
+        "hashtag_min_length": 3,
+        "pause": 600,
+        "log_level": "INFO",
+        "queue_slice": 0.3,
+    }
+
+    parser = OptionParser(usage="usage: %prog [options]",
+                          description=__doc__.strip(), version=__version__,
+                          epilog="Options need only be provided once via "
+                                 "command line as options specified are then "
+                                 "persisted in the data file, and reused "
+                                 "on subsequent runs. Required options can "
+                                 "also be omitted as they will then each be "
+                                 "prompted for individually.")
+
+    group = OptionGroup(parser, "Required")
+    group.add_option("-u", "--feed-url",
+                     dest="feed_url", metavar="url",
+                     help="RSS Feed URL")
+    parser.add_option_group(group)
+
+    group = OptionGroup(parser, "Optional")
+    group.add_option("-i", "--ignore",
+                     dest="ignore", metavar="strings",
+                     help="Comma separated strings for ignoring feed entries "
+                          "if they contain any of the strings")
+    group.add_option("-p", "--pause", type="int",
+                     dest="pause", metavar="seconds",
+                     help="Seconds between RSS feed requests "
+                          "(default:%s) " % defaults["pause"])
+    group.add_option("-q", "--queue-slice", type="float",
+                     dest="queue_slice", metavar="decimal",
+                     help="Decimal fraction of unposted tweets to send "
+                          "during each iteration between each feed request "
+                          "(default:%s) " % defaults["queue_slice"])
+    log_levels = ("ERROR", "INFO", "DEBUG")
+    group.add_option("-l", "--log-level", choices=log_levels,
+                     dest="log_level", metavar="level",
+                     help="Level of information printed (%s) "
+                          "(default:%s)" % ("|".join(log_levels),
+                                             defaults["log_level"]))
+    group.add_option("-m", "--hashtag-min-length", type="int",
+                     dest="hashtag_min_length", metavar="len",
+                     help="Minimum length of a hashtag "
+                          "(default:%s)" % defaults["hashtag_min_length"])
+    parser.add_option_group(group)
+
+    group = OptionGroup(parser, "Switches")
+    group.add_option("-f", "--dry-run",
+                     dest="dry_run", action="store_true", default=False,
+                     help="Fake run that doesn't save data or post tweets")
+    group.add_option("-d", "--daemonize",
+                     dest="daemonize", action="store_true", default=False,
+                     help="Run as a daemon")
+    group.add_option("-k", "--kill",
+                     dest="kill", action="store_true", default=False,
+                     help="Kill a previously started daemon")
+    group.add_option("-D", "--DESTROY",
+                     dest="destroy", action="store_true", default=False,
+                     help="Deletes all saved data and tweets from Twitter")
+    parser.add_option_group(group)
+
+    group = OptionGroup(parser, "Twitter authentication (all required)")
+    group.add_option("-w", "--consumer-key",
+                     dest="consumer_key", metavar="key",
+                     help="Twitter Consumer Key")
+    group.add_option("-x", "--consumer-secret",
+                     dest="consumer_secret", metavar="secret",
+                     help="Twitter Consumer Secret")
+    group.add_option("-y", "--access-token-key",
+                     dest="access_token_key", metavar="key",
+                     help="Twitter Access Token Key")
+    group.add_option("-z", "--access-token-secret",
+                     dest="access_token_secret", metavar="secret",
+                     help="Twitter Access Token Secret")
+    parser.add_option_group(group)
+
+    (parsed_options, _) = parser.parse_args()
 
     try:
         # Try and load a previously saved data file.
         with open(DATA_PATH, "rb") as f:
             data = load(f)
     except IOError:
-        # If no data file exists, prompt the user for the required options
-        # and create the data file, persisting the entered options.
+        # Create the default data file.
         print
-        print "Initial setup."
-        print "All data will be saved to '%s'" % DATA_PATH
-        print "Press CTRL C to abort."
+        print "Initial setup. Data will be saved to '%s'" % DATA_PATH
         print
-        options = {}
-        for option in parser.option_list:
-            if option.dest is not None:
-                value = getattr(parsed_options, option.dest)
-                if value is None:
-                    value = raw_input("Please enter '%s': " % option.help)
-                options[option.dest] = value
-        data = {"options": options, "todo": [], "done": set()}
-    else:
-        # Override any previously saved options with any values
-        # provided via command line.
-        for option in parser.option_list:
-            if option.dest is not None:
-                value = getattr(parsed_options, option.dest)
-                if value is not None:
-                    data["options"][option.dest] = value
-        options = data["options"]
-
-    # Save parsed options.
-    save()
-
-    # Set up the Twitter API object.
-    api = Api(**dict([(k, v) for k, v in options.items()
-                      if k.split("_")[0] in ("consumer", "access")]))
-
-    # Set up word files.
-    dictionary = wordfile("dictionary.txt")
-    stopwords = wordfile("stopwords.txt")
+        data = {"options": {}, "todo": [], "done": set()}
+    options = [o for g in parser.option_groups for o in g.option_list]
+    for option in options:
+        if option.dest is not None:
+            value = getattr(parsed_options, option.dest)
+            if value is None:
+                # Use previously saved value or default.
+                default = defaults.get(option.dest)
+                value = data["options"].get(option.dest, default)
+            if value is None:
+                value = raw_input("Please enter '%s': " % option.help)
+            data["options"][option.dest] = value
 
     # Set up logging.
     logging.basicConfig(format="%(asctime)s %(message)s")
-    logging.getLogger().setLevel(getattr(logging, options["loglevel"].upper()))
+    log_level = getattr(logging, data["options"]["log_level"])
+    logging.getLogger().setLevel(log_level)
+    formatted_options = []
+    padding = len(max(data["options"].keys(), key=len)) + 4
+    for option in options:
+        name = (option.dest + ": ").ljust(padding, ".")
+        value = data["options"][option.dest]
+        formatted_options.append("%s %s" % (name, value))
+    logging.debug("\n\nUsing options:\n\n%s\n" % "\n".join(formatted_options))
 
-    return parsed_options
+    return data
 
 
 def destroy():
@@ -169,7 +204,7 @@ def get_new_entries():
     entries = []
     feed = parse(options["feed_url"])
     try:
-        logging.error("Feed error: %s" % feed["bozo_exception"])
+        logging.error("Feed error: %s" % str(feed["bozo_exception"]).strip())
     except KeyError:
         pass
     saved = set([t["id"] for t in data["todo"]]) | data["done"]
@@ -230,7 +265,7 @@ def best_hashtag_with_score(possible_hashtags):
     best_hashtag = None
     highest_score = 0
     for hashtag in possible_hashtags:
-        if len(hashtag) >= options["hashtag_len_min"]:
+        if len(hashtag) >= options["hashtag_min_length"]:
             try:
                 results = api.GetSearch("#" + hashtag)
             except TwitterError, e:
@@ -311,21 +346,22 @@ def run(dry_run):
     last_feed_time = 0
     while True:
         # Get new entries and save the data file if new entries found
-        # if the delay period has elapsed.
-        if ((last_feed_time + int(options["delay"])) - time()) <= 0:
+        # if the pause period has elapsed.
+        if ((last_feed_time + int(options["pause"])) - time()) <= 0:
             last_feed_time = time()
             new_entries = get_new_entries()
             logging.debug("New queued entries: %s" % len(new_entries))
             if new_entries:
                 data["todo"].extend(new_entries)
                 save(dry_run=dry_run)
-            # Update the time to sleep - use the delay option unless
+            # Update the time to sleep - use the pause option unless
             # there are items in the "todo" queue, otherwise set the
-            # delay to consume the portion of the queue size defined
-            # by QUEUE_SLICE before the next feed request.
-            delay = int(options["delay"])
-            if len(data["todo"]) > QUEUE_SLICE * 10:
-                delay = int(delay / ceil(len(data["todo"]) * QUEUE_SLICE))
+            # pause to consume the portion of the queue size defined
+            # by the queue_slice option before the next feed request.
+            pause = int(options["pause"])
+            if len(data["todo"]) > options["queue_slice"] * 10:
+                queue_slice = ceil(len(data["todo"]) * options["queue_slice"])
+                pause = int(pause / queue_slice)
         # Process the first entry in the "todo" list.
         if data["todo"]:
             logging.debug("Total queued entries: %s" % len(data["todo"]))
@@ -344,8 +380,8 @@ def run(dry_run):
                 # Move the entry from "todo" to "done" and save.
                 data["done"].add(data["todo"].pop(0)["id"])
                 save(dry_run=dry_run)
-        logging.debug("Pausing for %s seconds" % delay)
-        sleep(delay)
+        logging.debug("Pausing for %s seconds" % pause)
+        sleep(pause)
 
 
 def kill_daemon():
@@ -365,26 +401,40 @@ def main():
     """
     Main entry point for program.
     """
-    parsed_options = configure()
-    if parsed_options.destroy:
+    global data, options, api, dictionary, stopwords
+
+    # Configure and load data.
+    data = configure_and_load()
+    save()
+    options = data["options"]
+
+    # Set up the Twitter API object.
+    api = Api(**dict([(k, v) for k, v in options.items()
+                      if k.split("_")[0] in ("consumer", "access")]))
+
+    # Set up word files.
+    dictionary = wordfile("dictionary.txt")
+    stopwords = wordfile("stopwords.txt")
+
+    if options["destroy"]:
         # Reset all data and delete tweets if specified.
         destroy()
-    elif parsed_options.kill:
+    elif options["kill"]:
         # Kill a previously started daemon.
         if kill_daemon():
             print "Daemon killed"
         else:
             print "Couldn't kill daemon"
-    elif parsed_options.daemonize:
+    elif options["daemonize"]:
         # Start a new daemon.
         kill_daemon()
         daemonize(PID_PATH)
-        run(parsed_options.dry_run)
+        run(options["dry_run"])
         print "Daemon started"
     else:
         # Start in the foreground.
         try:
-            run(parsed_options.dry_run)
+            run(options["dry_run"])
         except KeyboardInterrupt:
             print
             print "Quitting"
