@@ -66,7 +66,7 @@ def configure_and_load():
                                  "command line as options specified are then "
                                  "persisted in the data file, and reused "
                                  "on subsequent runs. Required options can "
-                                 "also be omitted as they will then each be "
+                                 "also be omitted as they will each then be "
                                  "prompted for individually.")
 
     group = OptionGroup(parser, "Required")
@@ -87,7 +87,7 @@ def configure_and_load():
     group.add_option("-q", "--queue-slice", type="float",
                      dest="queue_slice", metavar="decimal",
                      help="Decimal fraction of unposted tweets to send "
-                          "during each iteration between each feed request "
+                          "during each iteration between feed requests "
                           "(default:%s) " % defaults["queue_slice"])
     log_levels = ("ERROR", "INFO", "DEBUG")
     group.add_option("-l", "--log-level", choices=log_levels,
@@ -296,9 +296,11 @@ def best_hashtag_with_score(possible_hashtags):
     for hashtag in possible_hashtags:
         if len(hashtag) >= options["hashtag_min_length"]:
             try:
-                results = api.GetSearch("#" + hashtag)
+                results = api.GetSearch("#" + unicode(hashtag).decode())
             except TwitterError, e:
                 logging.error("Twitter error: %s" % e)
+            except UnicodeEncodeError:
+                pass
             else:
                 score = sum([t.created_at_in_seconds for t in results])
                 logging.debug("Score for '%s': %s" % (hashtag, score))
