@@ -346,11 +346,13 @@ def tweet_with_hashtags(tweet):
                           (word, ", ".join(possible_hashtags)))
             # Check none of the possibilities have been used.
             used = [t.lower() for t in hashtags.keys()]
-            if [t.lower() for t in possible_hashtags if t in used]:
+            if [t for t in possible_hashtags if t.lower() in used]:
                 logging.debug("Possible hashtags already used")
             else:
                 hashtag, score = best_hashtag_with_score(possible_hashtags)
                 if hashtag is not None:
+                    logging.debug("Best hashtag for the word '%s': %s" %
+                                  (word, hashtag))
                     hashtags[hashtag] = score
 
     # Sort hashtags by score and add to tweet.
