@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 """
 A Twitter bot that polls an RSS feed and posts the feed's titles as
 tweets, extracting words from the titles to use as hashtags.
@@ -60,6 +62,11 @@ def configure_and_load():
         "queue_slice": 0.3,
     }
 
+    # Options that can have their provided values appended to their
+    # persisted values when the --append switch is used.
+    appendable = ("--ignore", "--hashtag-min-length", "--pause",
+                  "--queue-slice")
+
     parser = OptionParser(usage="usage: %prog [options]",
                           description=__doc__.strip(), version=__version__,
                           epilog="Options need only be provided once via "
@@ -102,6 +109,14 @@ def configure_and_load():
     parser.add_option_group(group)
 
     group = OptionGroup(parser, "Switches")
+    group.add_option("-a", "--append",
+                     dest="append", action="store_true", default=False,
+                     help="Switch certain options into append mode where "
+                          "their values provided are appended to their "
+                          "persisted values, namely %s" % ", ".join(appendable))
+    group.add_option("-s", "--subtract",
+                     dest="subtract", action="store_true", default=False,
+                     help="Opposite of --append")
     group.add_option("-e", "--edit-data",
                      dest="edit_data", action="store_true", default=False,
                      help="Load a Python shell for editing the data file")
@@ -148,15 +163,27 @@ def configure_and_load():
         data = {"options": {}, "todo": [], "done": set()}
     options = [o for g in parser.option_groups for o in g.option_list]
     for option in options:
-        if option.dest is not None:
-            value = getattr(parsed_options, option.dest)
+        name = option.dest
+        if name is not None:
+            value = getattr(parsed_options, name)
+            default = data["options"].get(name, defaults.get(name))
+            if value is not None and option.get_opt_string() in appendable:
+                if parsed_options.append:
+                    if option.type == "string" and not value.startswith(","):
+                        value = "," + value
+                    value = default + value
+                elif parsed_options.subtract:
+                    if option.type == "string" and not value.startswith(","):
+                        default = set(default.split(","))
+                        value = set(value.split(","))
+                        value = ",".join(default - value)
+                    else:
+                        value = default - value
             if value is None:
-                # Use previously saved value or default.
-                default = defaults.get(option.dest)
-                value = data["options"].get(option.dest, default)
+                value = default
             if value is None:
                 value = raw_input("Please enter '%s': " % option.help)
-            data["options"][option.dest] = value
+            data["options"][name] = value
 
     # Set up logging.
     kwargs = {"format": "%(asctime)-15s %(levelname)-5s %(message)s"}
@@ -380,7 +407,7 @@ def run(dry_run):
     while True:
         # Get new entries and save the data file if new entries found
         # if the pause period has elapsed.
-        if ((last_feed_time + int(options["pause"])) - time()) <= 0:
+        if ((last_feed_time + options["pause"]) - time()) <= 0:
             last_feed_time = time()
             new_entries = get_new_entries()
             logging.debug("New queued entries: %s" % len(new_entries))
@@ -391,7 +418,7 @@ def run(dry_run):
             # there are items in the "todo" queue, otherwise set the
             # pause to consume the portion of the queue size defined
             # by the queue_slice option before the next feed request.
-            pause = int(options["pause"])
+            pause = options["pause"]
             if len(data["todo"]) > options["queue_slice"] * 10:
                 queue_slice = ceil(len(data["todo"]) * options["queue_slice"])
                 pause = int(pause / queue_slice)
