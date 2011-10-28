@@ -1,4 +1,4 @@
 daemon
 feedparser
 python-twitter
-spnix-me
+sphinx-me

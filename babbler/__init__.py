@@ -16,7 +16,7 @@ from os.path import dirname, join
 from time import sleep, time
 
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 
 DATA_PATH = join(getcwd(), "babbler.data")
