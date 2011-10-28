@@ -288,26 +288,21 @@ def possible_hashtags_for_index(words, i):
     """
     Returns up to 4 possible hashtags - all combinations of the next
     and previous words for the given index. If the word has a
-    possessive apostrophe, run again using the singular form.
+    possessive apostrophe, use the singular form.
     """
     valid_prev = i > 0 and words[i - 1].lower() not in stopwords
     valid_next = i < len(words) - 1 and words[i + 1].lower() not in stopwords
-    base_words = [words[i]]
-    if words[i].endswith("'s"):
-        # Singular for possessive.
-        base_words.append(words[i][:-2])
-    possible_hashtags = []
-    for word in base_words:
-        possible_hashtags.append(word)
-        if valid_prev:
-            # Combined with previous word.
-            possible_hashtags.append(words[i - 1] + word)
-        if valid_next:
-            # Combined with next word.
-            possible_hashtags.append(word + words[i + 1])
-        if valid_prev and valid_next:
-            # Combined with previous and next words.
-            possible_hashtags.append(words[i - 1] + word + words[i + 1])
+    word = words[i] if not words[i].lower().endswith("'s") else words[i][:-2]
+    possible_hashtags = [word]
+    if valid_prev:
+        # Combined with previous word.
+        possible_hashtags.append(words[i - 1] + word)
+    if valid_next:
+        # Combined with next word.
+        possible_hashtags.append(word + words[i + 1])
+    if valid_prev and valid_next:
+        # Combined with previous and next words.
+        possible_hashtags.append(words[i - 1] + word + words[i + 1])
     # Remove apostophes.
     return [t.replace("'", "") for t in possible_hashtags]
 
