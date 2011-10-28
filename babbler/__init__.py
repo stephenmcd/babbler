@@ -16,7 +16,7 @@ from os.path import dirname, join
 from time import sleep, time
 
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 
 DATA_PATH = join(getcwd(), "babbler.data")
@@ -254,6 +254,7 @@ def get_new_entries():
     """
     Loads the RSS feed in reverse order and return new entries.
     """
+    from feedparser import parse
     entries = []
     feed = parse(options["feed_url"])
     try:
@@ -454,7 +455,6 @@ def main():
     Main entry point for program.
     """
     from daemon import daemonize
-    from feedparser import parse
     from twitter import Api, TwitterError
 
     global data, options, api, dictionary, stopwords
