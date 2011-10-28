@@ -15,12 +15,9 @@ from os import getcwd, kill, remove
 from os.path import dirname, join
 from time import sleep, time
 
-from daemon import daemonize
-from feedparser import parse
-from twitter import Api, TwitterError
 
+__version__ = "0.1.1"
 
-__version__ = "0.1"
 
 DATA_PATH = join(getcwd(), "babbler.data")
 PID_PATH = join(getcwd(), "babbler.pid")
@@ -456,6 +453,10 @@ def main():
     """
     Main entry point for program.
     """
+    from daemon import daemonize
+    from feedparser import parse
+    from twitter import Api, TwitterError
+
     global data, options, api, dictionary, stopwords
 
     # Configure and load data.
