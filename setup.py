@@ -24,7 +24,7 @@ setup(
         "Development Status :: 4 - Beta",
         "Environment :: Console",
         "Intended Audience :: Developers",
-        "Intended Audience :: End Users/Desktop,"
+        "Intended Audience :: End Users/Desktop",
         "License :: OSI Approved :: BSD License",
         "Operating System :: POSIX",
         "Programming Language :: Python",
