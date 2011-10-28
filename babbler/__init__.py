@@ -3,6 +3,9 @@
 """
 A Twitter bot that polls an RSS feed and posts the feed's titles as
 tweets, extracting words from the titles to use as hashtags.
+
+After installing the 'babbler' command will be available which you
+can use to run the bot. Data will be stored in the current directory.
 """
 
 from __future__ import with_statement
@@ -16,7 +19,7 @@ from os.path import dirname, join
 from time import sleep, time
 
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 
 DATA_PATH = join(getcwd(), "babbler.data")
