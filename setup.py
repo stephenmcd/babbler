@@ -18,7 +18,7 @@ setup(
     install_requires=[r.strip() for r in open("requirements.txt") if r],
     entry_points="""
         [console_scripts]
-        babbler=babbler:main
+        babbler=babbler.bot:main
     """,
     classifiers=[
         "Development Status :: 4 - Beta",
