@@ -9,7 +9,7 @@ can use to run the bot. Data will be stored in the current directory.
 """
 
 
-__version__ = "0.2"
+__version__ = "0.2.1"
 
 
 def main():
