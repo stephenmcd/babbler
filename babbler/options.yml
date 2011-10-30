@@ -1,0 +1,164 @@
+
+defaults:
+
+  ignore: []
+  hashtag_min_length: 3
+  pause: 600
+  log_level: INFO
+  queue_slice: 0.3
+
+appendable:
+
+  - --ignore
+  - --hashtag-min-length
+  - --pause
+  - --queue-slice
+
+append option: append
+
+subtract option: subtract
+
+epilog: Options need only be provided once via command line as options
+        specified are then persisted in the data file, and reused on
+        subsequent runs. Required options can also be omitted as they
+        will each then be prompted for individually.
+
+options:
+
+  - Required:
+
+    - args:
+        - -u
+        - --feed-url
+      dest: feed_url
+      metavar: url
+      help: RSS Feed URL
+
+  - Optional:
+
+    - args:
+        - -i
+        - --ignore
+      dest: ignore
+      metavar: strings
+      help: Comma separated strings for ignoring feed entries if they
+            contain any of the strings
+
+    - args:
+        - -p
+        - --pause
+      dest: pause
+      metavar: seconds
+      type: int
+      help: Seconds between RSS feed requests (default:%(default)s)
+
+    - args:
+        - -q
+        - --queue-slice
+      dest: queue_slice
+      metavar: decimal
+      type: float
+      help: Decimal fraction of unposted tweets to send during each
+            iteration between feed requests (default:%(default)s)
+
+    - args:
+        - -l
+        - --log-level
+      dest: log_level
+      metavar: level
+      choices:
+        - ERROR
+        - INFO
+        - DEBUG
+      help: Level of information printed (%(choices)s) (default:%(default)s)
+
+    - args:
+        - -m
+        - --hashtag-min-length
+      dest: hashtag_min_length
+      metavar: len
+      type: int
+      help: Minimum length of a hashtag (default:%(default)s)
+
+  - Switches:
+
+    - args:
+        - -a
+        - --append
+      dest: append
+      action: store_true
+      help: Switch certain options into append mode where their values
+            provided are appended to their persisted values,
+            namely %(appendable)s
+
+    - args:
+        - -s
+        - --subtract
+      dest: subtract
+      action: store_true
+      help: Opposite of --append
+
+    - args:
+        - -e
+        - --edit-data
+      dest: edit_data
+      action: store_true
+      help: Load a Python shell for editing the data file
+
+    - args:
+        - -f
+        - --dry-run
+      dest: dry_run
+      action: store_true
+      help: Fake run that doesn't save data or post tweets
+
+    - args:
+        - -d
+        - --daemonize
+      dest: daemonize
+      action: store_true
+      help: Run as a daemon
+
+    - args:
+        - -k
+        - --kill
+      dest: kill
+      action: store_true
+      help: Kill a previously started daemon
+
+    - args:
+        - -D
+        - --DESTROY
+      dest: destroy
+      action: store_true
+      help: Deletes all saved data and tweets from Twitter
+
+  - Twitter authentication (all required):
+
+    - args:
+        - -w
+        - --consumer-key
+      dest: consumer_key
+      metavar: key
+      help: Twitter Consumer Key
+
+    - args:
+        - -x
+        - --consumer-secret
+      dest: consumer_secret
+      metavar: secret
+      help: Twitter Consumer Secret
+
+    - args:
+        - -y
+        - --access-token-key
+      dest: access_token_key
+      metavar: key
+      help: Twitter Access Token Key
+
+    - args:
+        - -z
+        - --access-token-secret
+      dest: access_token_secret
+      metavar: secret
+      help: Twitter Access Token Secret

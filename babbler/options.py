@@ -1,33 +1,50 @@
 
-from contextlib import contextmanager
 from optparse import OptionGroup, OptionParser
+
+from yaml import load
 
 
 class Options(dict):
     """
-    Extension to OptionParser - handles prompting for missing required
-    options, and handling switches for appending or subtracting to
-    default option values.
+    Wrapper for OptionParser - handles loading options from YAML,
+    prompting for missing required options, and handling switches
+    for appending or subtracting to default option values.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, yaml_path, **kwargs):
         """
         Set up args and OptionParser.
         """
-        self.defaults = kwargs.pop("defaults", {})
-        self.appendable = kwargs.pop("appendable", [])
-        self.append_option = kwargs.pop("append_option", None)
-        self.subtract_option = kwargs.pop("subtract_option", None)
-        self.parser = OptionParser(*args, **kwargs)
+        # Load YAML file and create OptionParser.
+        with open(yaml_path) as f:
+            data = load(f)
+        kwargs["usage"] = "usage: %prog [options]"
+        kwargs["epilog"] = data["epilog"]
+        existing = kwargs.pop("existing")
+        self.parser = OptionParser(**kwargs)
 
-    @contextmanager
-    def group(self, name):
-        """
-        Shortcut for setting up option groups.
-        """
-        group = OptionGroup(self.parser, name)
-        yield group
-        self.parser.add_option_group(group)
+        # Set Options specific attributes.
+        self.appendable = data["appendable"]
+        self.append_option = data["append option"]
+        self.subtract_option = data["subtract option"]
+        self.defaults = data["defaults"]
+
+        # Add each OptionGroup.
+        formatting = {"appendable": ", ".join(data["appendable"])}
+        for option_group in data["options"]:
+            for name, options in option_group.items():
+                group = OptionGroup(self.parser, name)
+                for option in options:
+                    formatting["default"] = self.defaults.get(option["dest"])
+                    formatting["choices"] = ", ".join(option.get("choices", []))
+                    if option.get("action") == "store_true":
+                        option["default"] = False
+                    elif option.get("action") == "store_false":
+                        option["default"] = True
+                    option["help"] %= formatting
+                    group.add_option(*option.pop("args"), **option)
+                self.parser.add_option_group(group)
+        self.defaults.update(existing)
 
     def append(self, option, value):
         """

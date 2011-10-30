@@ -2,8 +2,8 @@
 
 from code import interact
 import logging
-from os import getcwd, kill, remove
-from os.path import join
+from os import getcwd, kill
+from os.path import dirname, join
 import sys; sys.path.insert(0, getcwd())
 
 from daemon import daemonize
@@ -18,6 +18,7 @@ from babbler.persistence import PersistentDict
 DATA_PATH = join(getcwd(), "babbler.data")
 PID_PATH = join(getcwd(), "babbler.pid")
 LOG_PATH = join(getcwd(), "babbler.log")
+OPTIONS_PATH = join(dirname(__file__), "options.yml")
 TWEET_MAX_LEN = 140
 
 
@@ -25,26 +26,10 @@ def configure_and_load():
     """
     Handles command-line arg parsing and loading of data.
     """
-
-    # Maintain defaults separately, since OptionParser doesn't provide
-    # a way of distinguishing between an option provided or a default
-    # used.
-    defaults = {
-        "ignore": [],
-        "hashtag_min_length": 3,
-        "pause": 600,
-        "log_level": "INFO",
-        "queue_slice": 0.3,
-    }
-
-    # Options that can have their provided values appended to their
-    # persisted values when the --append switch is used.
-    appendable = ("--ignore", "--hashtag-min-length", "--pause",
-                  "--queue-slice")
-
     data = PersistentDict(path=DATA_PATH)
+    existing_options = {}
     if data.load():
-        defaults.update(data["options"])
+        existing_options = data["options"]
         # Migrate from 0.1 format.
         if "todo" in data:
             data["feed"] = Feed()
@@ -54,91 +39,15 @@ def configure_and_load():
         print
         print "Initial setup. Data will be saved to '%s'" % DATA_PATH
         print
-
-    from __init__ import __doc__ as doc, __version__ as version
-    options = Options(usage="usage: %prog [options]", description=doc.strip(),
-                      version=version, defaults=defaults, appendable=appendable,
-                      append_option="append", subtract_option="subtract",
-                      epilog="Options need only be provided once via command "
-                             "line as options specified are then persisted in "
-                             "the data file, and reused on subsequent runs. "
-                             "Required options can also be omitted as they "
-                             "will each then be prompted for individually.")
-
-    with options.group("Required") as g:
-        g.add_option("-u", "--feed-url",
-                     dest="feed_url", metavar="url",
-                     help="RSS Feed URL")
-
-    with options.group("Optional") as g:
-        g.add_option("-i", "--ignore",
-                     dest="ignore", metavar="strings",
-                     help="Comma separated strings for ignoring feed entries "
-                          "if they contain any of the strings")
-        g.add_option("-p", "--pause", type="int",
-                     dest="pause", metavar="seconds",
-                     help="Seconds between RSS feed requests (default:%s) " %
-                          defaults["pause"])
-        g.add_option("-q", "--queue-slice", type="float",
-                     dest="queue_slice", metavar="decimal",
-                     help="Decimal fraction of unposted tweets to send during "
-                          "each iteration between feed requests (default:%s) " %
-                          defaults["queue_slice"])
-        log_levels = ("ERROR", "INFO", "DEBUG")
-        g.add_option("-l", "--log-level", choices=log_levels,
-                     dest="log_level", metavar="level",
-                     help="Level of information printed (%s) (default:%s)" %
-                          ("|".join(log_levels), defaults["log_level"]))
-        g.add_option("-m", "--hashtag-min-length", type="int",
-                     dest="hashtag_min_length", metavar="len",
-                     help="Minimum length of a hashtag (default:%s)" %
-                          defaults["hashtag_min_length"])
-
-    with options.group("Switches") as g:
-        g.add_option("-a", "--append",
-                     dest="append", action="store_true", default=False,
-                     help="Switch certain options into append mode where their "
-                          "values provided are appended to their persisted "
-                          "values, namely %s" % ", ".join(appendable))
-        g.add_option("-s", "--subtract",
-                     dest="subtract", action="store_true", default=False,
-                     help="Opposite of --append")
-        g.add_option("-e", "--edit-data",
-                     dest="edit_data", action="store_true", default=False,
-                     help="Load a Python shell for editing the data file")
-        g.add_option("-f", "--dry-run",
-                     dest="dry_run", action="store_true", default=False,
-                     help="Fake run that doesn't save data or post tweets")
-        g.add_option("-d", "--daemonize",
-                     dest="daemonize", action="store_true", default=False,
-                     help="Run as a daemon")
-        g.add_option("-k", "--kill",
-                     dest="kill", action="store_true", default=False,
-                     help="Kill a previously started daemon")
-        g.add_option("-D", "--DESTROY",
-                     dest="destroy", action="store_true", default=False,
-                     help="Deletes all saved data and tweets from Twitter")
-
-    with options.group("Twitter authentication (all required)") as g:
-        g.add_option("-w", "--consumer-key",
-                     dest="consumer_key", metavar="key",
-                     help="Twitter Consumer Key")
-        g.add_option("-x", "--consumer-secret",
-                     dest="consumer_secret", metavar="secret",
-                     help="Twitter Consumer Secret")
-        g.add_option("-y", "--access-token-key",
-                     dest="access_token_key", metavar="key",
-                     help="Twitter Access Token Key")
-        g.add_option("-z", "--access-token-secret",
-                     dest="access_token_secret", metavar="secret",
-                     help="Twitter Access Token Secret")
-
+    from __init__ import __doc__, __version__
+    options = Options(OPTIONS_PATH, existing=existing_options,
+                      description=__doc__.strip(), __version__=version)
     data["options"] = options.parse_args()
     data.save()
     return data
 
 
-def destroy(api):
+def destroy(data, api):
     """
     Destroys persisted data file and deletes all tweets from Twitter
     when the --DESTROY option is given.
@@ -149,7 +58,7 @@ def destroy(api):
     if raw_input("Enter 'y' to continue. ").strip().lower() == "y":
         print "Deleting all data and tweets."
         try:
-            remove(DATA_PATH)
+            data.remove()
         except OSError:
             pass
         while True:
@@ -166,7 +75,7 @@ def destroy(api):
         print "--DESTROY aborted"
 
 
-def edit():
+def edit(data, api):
     """
     Runs a Python shell for editing the data file.
     """
@@ -184,7 +93,9 @@ def edit():
     print
     print "The 'data.save()' method can be called to persist changes made."
     print
-    interact(local=globals())
+    local = locals()
+    local.update(globals())
+    interact(local=local)
 
 
 def run(data, api):
@@ -192,6 +103,8 @@ def run(data, api):
     Main event loop that gets the entries from the feed and posts them
     to Twitter.
     """
+
+    # Set up the feed.
     data.setdefault("feed", Feed())
     data["feed"].setup(dict(max_len=TWEET_MAX_LEN, **data["options"]))
     data.save()
@@ -203,8 +116,6 @@ def run(data, api):
     logging.basicConfig(**kwargs)
     log_level = getattr(logging, data["options"]["log_level"])
     logging.getLogger().setLevel(log_level)
-
-    logging.debug("\n\nUsing options:\n\n%s\n" % data["options"])
 
     # Set up hashtagging.
     def hashtag_score(hashtag):
@@ -221,6 +132,7 @@ def run(data, api):
     tagger = Tagger(scorer=hashtag_score, min_length=hashtag_min_length)
 
     # Main loop.
+    logging.debug("\n\nUsing options:\n\n%s\n" % data["options"])
     for entry in data["feed"]:
         for tag in tagger.tags(entry):
             tag = " #" + tag
@@ -269,7 +181,7 @@ def main():
 
     if data["options"]["destroy"]:
         # Reset all data and delete tweets if specified.
-        destroy(api)
+        destroy(data, api)
     elif data["options"]["kill"]:
         # Kill a previously started daemon.
         if kill_daemon():
@@ -278,7 +190,7 @@ def main():
             print "Couldn't kill daemon"
     elif data["options"]["edit_data"]:
         # Run a Python shell for editing data.
-        edit()
+        edit(data, api)
     elif data["options"]["daemonize"]:
         # Start a new daemon.
         kill_daemon()

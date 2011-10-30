@@ -2,3 +2,4 @@ daemon
 feedparser
 python-twitter
 sphinx-me
+PyYAML
