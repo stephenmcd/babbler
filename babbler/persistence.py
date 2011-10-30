@@ -5,7 +5,7 @@ from os import remove
 
 class PersistentDict(dict):
     """
-    Dictionary persisted to a pickle file.
+    Dictionary that persists itself to a pickle file.
     """
 
     def __init__(self, path):

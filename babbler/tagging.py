@@ -12,18 +12,12 @@ class Tagger(object):
         """
         Load dictionary and stopwords.
         """
-        self.min_length = min_length
-        self.dictionary = self.wordfile("dictionary.txt")
-        self.stopwords = self.wordfile("stopwords.txt")
         self.scorer = scorer
-
-    def wordfile(self, filename):
-        """
-        Returns a set word list from a file.
-        Used for dictionary and stopwords.
-        """
-        with open(join(dirname(__file__), "wordfiles", filename)) as f:
-            return set([s.strip() for s in f])
+        self.min_length = min_length
+        for wordfile in ("dictionary", "stopwords"):
+            path = join(dirname(__file__), "wordfiles", wordfile + ".txt")
+            with open(path) as f:
+                setattr(self, wordfile, set([s.strip() for s in f]))
 
     def possible_for_index(self, words, i):
         """

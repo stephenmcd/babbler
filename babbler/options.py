@@ -36,7 +36,7 @@ class Options(dict):
                 group = OptionGroup(self.parser, name)
                 for option in options:
                     formatting["default"] = self.defaults.get(option["dest"])
-                    formatting["choices"] = ", ".join(option.get("choices", []))
+                    formatting["choices"] = "|".join(option.get("choices", []))
                     if option.get("action") == "store_true":
                         option["default"] = False
                     elif option.get("action") == "store_false":
