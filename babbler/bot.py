@@ -9,6 +9,7 @@ from twitter import Api, TwitterError
 
 from babbler.feed import Feed
 from babbler.options import Options
+from babbler.responder import RespondingFeed
 from babbler.tagging import Tagger
 from babbler.persistence import PersistentDict
 
@@ -22,11 +23,13 @@ class Bot(object):
         """
         Handles command-line arg parsing and loading of data.
         """
-        # Set up paths.
+        # Set up file paths.
+        self.package_data_path = join(dirname(__file__), "data")
         self.data_path = join(getcwd(), "babbler.data")
         self.pid_path = join(getcwd(), "babbler.pid")
         self.log_path = join(getcwd(), "babbler.log")
-        self.options_path = join(dirname(__file__), "options.yml")
+        self.options_path = join(self.package_data_path, "options.yml")
+        self.eliza_path = join(self.package_data_path, "eliza.yml")
         # Load persisted data.
         self.data = PersistentDict(path=self.data_path)
         existing_options = {}
@@ -34,9 +37,15 @@ class Bot(object):
             existing_options = self.data["options"]
             # Migrate from 0.1 format.
             if "todo" in self.data:
-                self.data["feed"] = Feed()
+                self.data["feed"] = RespondingFeed()
                 self.data["feed"].todo = self.data.pop("todo")
                 self.data["feed"].done = self.data.pop("done")
+            # Migrate from 0.2 format.
+            feed = self.data["feed"]
+            if isinstance(feed, Feed):
+                self.data["feed"] = RespondingFeed()
+                self.data["feed"].todo = feed.todo
+                self.data["feed"].done = feed.done
         else:
             print
             print "Initial setup. Data will be saved to '%s'" % self.data_path
@@ -67,30 +76,42 @@ class Bot(object):
         logging.getLogger().setLevel(log_level)
         logging.debug("\n\nUsing options:\n\n%s\n" % self.data["options"])
         # Set up the feed.
-        self.data.setdefault("feed", Feed())
-        feed_options = dict(max_len=TWEET_MAX_LEN, **self.data["options"])
+        self.data.setdefault("feed", RespondingFeed())
+        feed_options = dict(twitter=self.twitter, max_len=TWEET_MAX_LEN,
+                            eliza_path=self.eliza_path, **self.data["options"])
         self.data["feed"].setup(feed_options)
         self.data.save()
         # Set up hashtagging.
         tagger = Tagger(scorer=self.hashtag_score,
+                        data_path=self.package_data_path,
                         min_length=self.data["options"]["hashtag_min_length"])
         # Main loop.
         for entry in self.data["feed"]:
-            for tag in tagger.tags(entry):
+            try:
+                # Twitter reply.
+                tweet = ". %s %s" % (entry["to"], entry["title"])
+                reply_to = entry["id"]
+            except KeyError:
+                # Feed entry.
+                tweet = entry["title"]
+                reply_to = None
+            for tag in tagger.tags(entry["title"]):
                 tag = " #" + tag
-                if len(entry + tag) <= TWEET_MAX_LEN:
-                    entry += tag
+                # Extra check to ensure tag isn't already in the tweet.
+                if (len(tweet + tag) <= TWEET_MAX_LEN and
+                    tag.strip().lower() not in tweet.lower()):
+                    tweet += tag
             # Post to Twitter.
             done = True
             try:
                 if not self.data["options"]["dry_run"]:
-                    self.twitter.PostUpdate(entry)
+                    self.twitter.PostUpdate(tweet, reply_to)
             except TwitterError, e:
                 logging.error("Twitter error: %s" % e)
                 # Mark the entry as done if it's a duplicate.
                 done = str(e) == "Status is a duplicate."
             if done:
-                logging.info("Tweeted: %s" % entry)
+                logging.info("Tweeted: %s" % tweet)
                 # Move the entry from "todo" to "done" and save.
                 self.data["feed"].process()
                 if not self.data["options"]["dry_run"]:

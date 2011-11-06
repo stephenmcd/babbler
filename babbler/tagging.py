@@ -8,14 +8,14 @@ class Tagger(object):
     Extracts tags from text.
     """
 
-    def __init__(self, scorer, min_length):
+    def __init__(self, scorer, data_path, min_length):
         """
         Load dictionary and stopwords.
         """
         self.scorer = scorer
         self.min_length = min_length
         for wordfile in ("dictionary", "stopwords"):
-            path = join(dirname(__file__), "wordfiles", wordfile + ".txt")
+            path = join(data_path, wordfile + ".txt")
             with open(path) as f:
                 setattr(self, wordfile, set([s.strip() for s in f]))
 
@@ -29,9 +29,11 @@ class Tagger(object):
         prev_valid = prev and prev not in self.stopwords
         next = words[i + 1] if i < len(words) - 1 else None
         next_valid = next and next not in self.stopwords
-        word = words[i]
-        if word.lower().endswith("'s"):
-            word = word[:-2]
+        word = words[i].encode("utf-8")
+        singular = [word[:len(end) * -1] for end in ("'s", "\xe2\x80\x99s")
+                    if word.lower().endswith(end)]
+        if singular:
+            word = singular[0]
         tags = [word]
         if prev:
             # Combined with previous word.

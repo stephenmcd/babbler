@@ -2,14 +2,15 @@
 
 """
 A Twitter bot that polls an RSS feed and posts its entries as tweets,
-with auto-generated hashtags.
+with auto-generated hashtags. For extra mischief, replies to the bot
+are responded to using a basic Eliza implementation.
 
 After installing, the 'babbler' command will be available which you
 can use to run the bot. Data will be stored in the current directory.
 """
 
 
-__version__ = "0.2.2"
+__version__ = "0.3"
 
 
 def main():

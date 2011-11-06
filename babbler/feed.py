@@ -26,6 +26,9 @@ class Feed(object):
         self.max_len = options["max_len"]
         self.ignore = options["ignore"]
 
+    def saved(self):
+        return set([t["id"] for t in self.todo]) | self.done
+
     def entries(self):
         """
         Loads the RSS feed in reverse order and return new entries.
@@ -38,7 +41,7 @@ class Feed(object):
             pass
         else:
             logging.error("Feed error: %s" % error)
-        saved = set([t["id"] for t in self.todo]) | self.done
+        saved = self.saved()
         for entry in reversed(feed.entries):
             if entry["id"] not in saved:
                 # Ignore entries that match any ignore string, are too
@@ -86,7 +89,7 @@ class Feed(object):
             # Yield the first entry in the "todo" list.
             if self.todo:
                 logging.debug("Total queued entries: %s" % len(self.todo))
-                yield self.todo[0]["title"]
+                yield self.todo[0]
             logging.debug("Pausing for %s seconds" % pause)
             sleep(pause)
 

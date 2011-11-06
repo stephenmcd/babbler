@@ -1,6 +1,8 @@
-babbler.data
-babbler.pid
-babbler.log
+syntax: glob
+*.data
+*.pid
+*.log
+*.bak
 babbler.egg-info/*
 build/*
 dist/*
