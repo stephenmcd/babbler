@@ -89,7 +89,7 @@ class Bot(object):
         for entry in self.data["feed"]:
             try:
                 # Twitter reply.
-                tweet = ". %s %s" % (entry["to"], entry["title"])
+                tweet = "%s %s" % (entry["to"], entry["title"])
                 reply_to = entry["id"]
             except KeyError:
                 # Feed entry.

@@ -67,7 +67,7 @@ class RespondingFeed(Feed):
                     tries = 3
                     while True:
                         response = self.response(text)
-                        response_with_from = ". %s %s" % (from_name, response)
+                        response_with_from = "%s %s" % (from_name, response)
                         if len(response_with_from) > self.max_len:
                             logging.debug("Response too long: %s" %
                                           response_with_from)
