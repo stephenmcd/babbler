@@ -29,7 +29,7 @@ class Tagger(object):
         prev_valid = prev and prev not in self.stopwords
         next = words[i + 1] if i < len(words) - 1 else None
         next_valid = next and next not in self.stopwords
-        word = words[i].encode("utf-8")
+        word = words[i]
         singular = [word[:len(end) * -1] for end in ("'s", "\xe2\x80\x99s")
                     if word.lower().endswith(end)]
         if singular:
@@ -86,7 +86,7 @@ class Tagger(object):
         # Initial list of alphanumeric words
         # Treat dashes and slashes as separators.
         words = "".join([c for c in text.replace("-", " ").replace("/", " ")
-                         if c.isalnum() or c in "' "]).split()
+                         if c.isalnum() or c in "' "]).encode("utf-8").split()
         # All tags mapped to scores.
         tags = {}
         for i, word in enumerate(words):
