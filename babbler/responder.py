@@ -87,39 +87,22 @@ class RespondingFeed(Feed):
         # over feed entries.
         return entries + super(RespondingFeed, self).entries()
 
-    """
-    The response and translate methods adopted from:
-    http://www.jezuk.co.uk/cgi-bin/view/software/eliza
-    """
-
     def response(self, text):
         """
         Matches the given text to one of the response patterns.
+        Adopted from: http://www.jezuk.co.uk/cgi-bin/view/software/eliza
         """
         for pattern, responses in self.patterns:
             match = pattern.match(text)
             if match:
                 response = choice(responses)
                 # Switch reflections.
-                while True:
-                    pos = response.find("%")
-                    if pos == -1:
-                        break
-                    switch = self.translate(match.group(int(response[pos + 1])))
-                    response = response[:pos] + switch + response[pos + 2:]
+                for token in re.finditer("%\d", response):
+                    token = token.group()
+                    words = match.group(int(token[1:])).lower().split()
+                    reflected = [self.reflections.get(w, w) for w in words]
+                    response = re.sub(token, " ".join(reflected), response)
                 # Remove extraneous punctuation.
                 while len(response.rstrip(punctuation)) + 1 < len(response):
                     response = response[:-2] + response[-1]
                 return response
-
-    def translate(self, match):
-        """
-        Translates reflections.
-        """
-        words = match.lower().split()
-        for i, word in enumerate(words):
-            try:
-                words[i] = self.reflections[word]
-            except KeyError:
-                pass
-        return " ".join(words)
