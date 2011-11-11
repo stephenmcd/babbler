@@ -55,12 +55,11 @@ class Tagger(object):
         best = None
         highscore = 0
         for tag in tags:
-            if len(tag) >= self.min_length:
-                score = self.scorer(tag)
-                logging.debug("Score for '%s': %s" % (tag, score))
-                if score > highscore:
-                    highscore = score
-                    best = tag
+            score = self.scorer(tag)
+            logging.debug("Score for '%s': %s" % (tag, score))
+            if score > highscore:
+                highscore = score
+                best = tag
         return best, highscore
 
     def tags(self, text):
@@ -69,11 +68,11 @@ class Tagger(object):
 
         Steps:
 
-        1) Go through every word in the text and if non-dictionary and
-           non-numeric, create up to 4 possible tags from it, the word
-           combined with the previous word, the next word, both previous
-           and next words together, and the word itself. Only use previous
-           and next words that aren't stopwords.
+        1) Go through every word in the text and if non-numeric, valid
+           length and non-dictionary, create up to 4 possible tags from
+           it, the word combined with the previous word, the next word,
+           both previous and next words together, and the word itself.
+           Only use previous and next words that aren't stopwords.
         2) Ignore all the possible tags from the word if any of
            them have already been added as tags, eg via the previous
            or next word iteration, or a duplicate word.
@@ -94,7 +93,8 @@ class Tagger(object):
             # Ignore numbers and numeric positions, eg: '1st' or '44th'.
             numeric = (word.lower().endswith(("st", "nd", "th")) and
                        word[:-2].isdigit()) or word.isdigit()
-            if not (numeric or word.lower() in self.dictionary):
+            too_short = len(word) < self.min_length
+            if not (numeric or too_short or word.lower() in self.dictionary):
                 possible = self.possible_for_index(words, i)
                 logging.debug("Possible tags for the word '%s': %s" %
                               (word, ", ".join(possible)))
