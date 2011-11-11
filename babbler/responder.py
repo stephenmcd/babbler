@@ -47,7 +47,12 @@ class RespondingFeed(Feed):
         """
         entries = []
         saved = self.saved()
-        for mention in self.twitter.GetMentions():
+        mentions = []
+        try:
+            mentions = self.twitter.GetMentions()
+        except Exception, e:
+            logging.error("Error getting mentions: %s" % e)
+        for mention in mentions:
             if mention.in_reply_to_screen_name and mention.id not in saved:
                 to_name = "@" + mention.in_reply_to_screen_name
                 from_name = "@" + mention.user.screen_name

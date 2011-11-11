@@ -106,8 +106,8 @@ class Bot(object):
             try:
                 if not self.data["options"]["dry_run"]:
                     self.twitter.PostUpdate(tweet, reply_to)
-            except TwitterError, e:
-                logging.error("Twitter error: %s" % e)
+            except Exception, e:
+                logging.error("Error tweeting '%s': %s" % (tweet, e))
                 # Mark the entry as done if it's a duplicate.
                 done = str(e) == "Status is a duplicate."
             if done:
@@ -124,10 +124,8 @@ class Bot(object):
         """
         try:
             results = self.twitter.GetSearch("#" + hashtag)
-        except TwitterError, e:
-            logging.error("Twitter error: %s" % e)
-        except UnicodeEncodeError:
-            pass
+        except Exception, e:
+            logging.error("Error searching for tag '%s': %s" % (hashtag, e))
         else:
             return sum([t.created_at_in_seconds for t in results])
         return 0
