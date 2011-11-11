@@ -1,6 +1,7 @@
 
 import logging
 from os.path import dirname, join
+from unicodedata import normalize
 
 
 class Tagger(object):
@@ -62,7 +63,7 @@ class Tagger(object):
                 best = tag
         return best, highscore
 
-    def tags(self, text):
+    def tags(self, text, ascii=True):
         """
         Returns tags for the given text.
 
@@ -82,10 +83,13 @@ class Tagger(object):
 
         """
         logging.debug("Getting tags for: %s" % text)
-        # Initial list of alphanumeric words
         # Treat dashes and slashes as separators.
-        words = "".join([c for c in text.replace("-", " ").replace("/", " ")
-                         if c.isalnum() or c in "' "]).encode("utf-8").split()
+        text = unicode(text.replace("-", " ").replace("/", " "))
+        # Translate unicode chars to ascii.
+        if ascii:
+            text = normalize("NFKD", text).encode("ascii", "ignore")
+        # Initial list of alphanumeric words.
+        words = "".join([c for c in text if c.isalnum() or c in "' "]).split()
         # All tags mapped to scores.
         tags = {}
         for i, word in enumerate(words):
