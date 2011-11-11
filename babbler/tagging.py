@@ -36,10 +36,10 @@ class Tagger(object):
         if singular:
             word = singular[0]
         tags = [word]
-        if prev:
+        if prev_valid:
             # Combined with previous word.
             tags.append(prev + word)
-        if next:
+        if next_valid:
             # Combined with next word.
             tags.append(word + next)
         if prev_valid and next_valid:
