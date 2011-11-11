@@ -86,36 +86,39 @@ class Bot(object):
                         data_path=self.package_data_path,
                         min_length=self.data["options"]["hashtag_min_length"])
         # Main loop.
-        for entry in self.data["feed"]:
-            try:
-                # Twitter reply.
-                tweet = "%s %s" % (entry["to"], entry["title"])
-                reply_to = entry["id"]
-            except KeyError:
-                # Feed entry.
-                tweet = entry["title"]
-                reply_to = None
-            for tag in tagger.tags(entry["title"]):
-                tag = " #" + tag
-                # Extra check to ensure tag isn't already in the tweet.
-                if (len(tweet + tag) <= TWEET_MAX_LEN and
-                    tag.strip().lower() not in tweet.lower()):
-                    tweet += tag
-            # Post to Twitter.
-            done = True
-            try:
-                if not self.data["options"]["dry_run"]:
-                    self.twitter.PostUpdate(tweet, reply_to)
-            except Exception, e:
-                logging.error("Error tweeting '%s': %s" % (tweet, e))
-                # Mark the entry as done if it's a duplicate.
-                done = str(e) == "Status is a duplicate."
-            if done:
-                logging.info("Tweeted: %s" % tweet)
-                # Move the entry from "todo" to "done" and save.
-                self.data["feed"].process()
-                if not self.data["options"]["dry_run"]:
-                    self.data.save()
+        try:
+            for entry in self.data["feed"]:
+                try:
+                    # Twitter reply.
+                    tweet = "%s %s" % (entry["to"], entry["title"])
+                    reply_to = entry["id"]
+                except KeyError:
+                    # Feed entry.
+                    tweet = entry["title"]
+                    reply_to = None
+                for tag in tagger.tags(entry["title"]):
+                    tag = " #" + tag
+                    # Extra check to ensure tag isn't already in the tweet.
+                    if (len(tweet + tag) <= TWEET_MAX_LEN and
+                        tag.strip().lower() not in tweet.lower()):
+                        tweet += tag
+                # Post to Twitter.
+                done = True
+                try:
+                    if not self.data["options"]["dry_run"]:
+                        self.twitter.PostUpdate(tweet, reply_to)
+                except Exception, e:
+                    logging.error("Error tweeting '%s': %s" % (tweet, e))
+                    # Mark the entry as done if it's a duplicate.
+                    done = str(e) == "Status is a duplicate."
+                if done:
+                    logging.info("Tweeted: %s" % tweet)
+                    # Move the entry from "todo" to "done" and save.
+                    self.data["feed"].process()
+                    if not self.data["options"]["dry_run"]:
+                        self.data.save()
+        except Exception, e:
+            logging.critical("Shutting down on unhandled error: %s" % e)
 
     def hashtag_score(self, hashtag):
         """
